@@ -297,6 +297,63 @@ app.whenReady().then(async () => {
     await js('window.__obs.disconnect(); closeTab(activeTab)');
   });
 
+  console.log('\nGroups');
+  await test('group names are normalised: "A/B", " A / / B " -> "A / B"', async () => {
+    const a = add({ name: 'tree-a', port: 22, password: 'x', group: 'Tree/Prod' });
+    const b = add({ name: 'tree-b', port: 22, password: 'x', group: '  Tree /  / Prod ' });
+    assert(a.group === 'Tree / Prod' && b.group === 'Tree / Prod', `${a.group} | ${b.group}`);
+    add({ name: 'tree-c', port: 22, password: 'x', group: 'Tree / Test' });
+    add({ name: 'tree-d', port: 22, password: 'x', group: 'Tree' });
+  });
+
+  const groupRows = () => js(`[...document.querySelectorAll('#host-list .group-row')].filter(r => r.dataset.group.startsWith('Tree')).map(r => r.dataset.group + '=' + r.querySelector('.group-count').textContent)`);
+  const visibleTreeHosts = () => js(`[...document.querySelectorAll('#host-list .host .host-name')].map(n => n.textContent).filter(n => n.startsWith('tree-'))`);
+
+  await test('sidebar shows groups as a tree: subgroups first, then hosts, with counts', async () => {
+    await js(`localStorage.removeItem('shellfish.collapsedGroups'); collapsedGroups = new Set(); loadHosts()`);
+    await until(() => visibleTreeHosts().then((h) => h.length === 4), 3000, 'tree hosts');
+    assert((await groupRows()).join('|') === 'Tree=4|Tree / Prod=2|Tree / Test=1', (await groupRows()).join('|'));
+    assert((await visibleTreeHosts()).join('|') === 'tree-a|tree-b|tree-c|tree-d', (await visibleTreeHosts()).join('|'));
+  });
+
+  await test('collapsing a group hides its hosts and subgroups, and is remembered', async () => {
+    await js(`document.querySelector('.group-row[data-group="Tree / Prod"]').click()`);
+    assert((await visibleTreeHosts()).join('|') === 'tree-c|tree-d', 'Tree / Prod should be collapsed');
+    await js(`document.querySelector('.group-row[data-group="Tree"]').click()`);
+    assert((await visibleTreeHosts()).length === 0 && (await groupRows()).join('|') === 'Tree=4', 'Tree should hide everything');
+    await js('loadHosts()');
+    await wait(200);
+    assert((await groupRows()).join('|') === 'Tree=4', 'collapse state lost after reload of the host list');
+    const saved = await js(`JSON.parse(localStorage.getItem('shellfish.collapsedGroups'))`);
+    assert(saved.includes('Tree') && saved.includes('Tree / Prod'), JSON.stringify(saved));
+    await js(`document.querySelector('.group-row[data-group="Tree"]').click()`);
+    assert((await visibleTreeHosts()).join('|') === 'tree-c|tree-d', 'reopening Tree keeps Tree / Prod collapsed');
+  });
+
+  await test('search shows matches inside collapsed groups, and matches group names', async () => {
+    await js(`document.querySelector('#host-search').value = 'tree-a'; renderHostList()`);
+    assert((await visibleTreeHosts()).join('|') === 'tree-a', 'match inside a collapsed group not shown');
+    await js(`document.querySelector('#host-search').value = 'tree / test'; renderHostList()`);
+    assert((await visibleTreeHosts()).join('|') === 'tree-c', 'searching a group name should show its hosts');
+    await js(`document.querySelector('#host-search').value = ''; renderHostList()`);
+    assert((await visibleTreeHosts()).join('|') === 'tree-c|tree-d', 'collapse state should return after the search');
+  });
+
+  await test('collapse all / expand all', async () => {
+    await js(`document.querySelector('.list-tools [title="Collapse all groups"]').click()`);
+    assert((await visibleTreeHosts()).length === 0, 'collapse all');
+    await js(`document.querySelector('.list-tools [title="Expand all groups"]').click()`);
+    assert((await visibleTreeHosts()).length === 4, 'expand all');
+  });
+
+  await test('"+" on a group header creates a host in that group', async () => {
+    await js(`document.querySelector('.group-row[data-group="Tree / Test"] .group-add').click()`);
+    const v = await js(`(() => { const f = document.querySelector('#host-form'); return { group: f.elements.group.value, title: document.querySelector('#host-form-title').textContent, options: [...document.querySelectorAll('#group-options option')].map(o => o.value) }; })()`);
+    await js('closeHostEditor()');
+    assert(v.group === 'Tree / Test' && v.title === 'New host', JSON.stringify(v));
+    assert(['Tree', 'Tree / Prod', 'Tree / Test'].every((g) => v.options.includes(g)), 'group suggestions should include parents and subgroups');
+  });
+
   console.log('\nSaved commands');
   await test('commands are stored cleanly in hosts.json', async () => {
     const h = store.saveHost({ ...store.getHost(hDirect.id), password: null, commands: [

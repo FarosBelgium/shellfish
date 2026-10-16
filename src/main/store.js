@@ -135,7 +135,7 @@ class Store {
     const host = {
       id: existing ? existing.id : crypto.randomUUID(),
       name: str(input.name) || str(input.host),
-      group: str(input.group),
+      group: groupPath(input.group),
       label: str(input.label).slice(0, 24),
       color: /^#[0-9a-f]{6}$/i.test(str(input.color)) ? str(input.color).toLowerCase() : '',
       host: str(input.host),
@@ -211,6 +211,11 @@ function cleanCommands(list) {
     .filter((c) => c.command.trim())
     .map((c) => ({ ...c, name: c.name || c.command.split('\n')[0].slice(0, 40) }))
     .slice(0, 100);
+}
+
+// "Klant A/Prod", "Klant A /Prod" -> "Klant A / Prod": subgroups are separated by "/".
+function groupPath(v) {
+  return str(v).split('/').map((s) => s.trim()).filter(Boolean).join(' / ');
 }
 
 function str(v) {

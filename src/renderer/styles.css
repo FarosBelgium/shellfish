@@ -73,7 +73,32 @@ select { color: var(--text); }
 .sidebar-actions { display: flex; gap: 6px; padding: 0 10px 10px; }
 .sidebar-actions input { min-width: 0; }
 #host-list { flex: 1; overflow-y: auto; padding: 0 6px 6px; }
-.group-title { padding: 10px 8px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.list-tools { display: flex; align-items: center; gap: 4px; padding: 4px 4px 2px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.list-tools span { flex: 1; }
+.list-tools .btn.icon { min-width: 24px; padding: 1px 4px; }
+/* Group headers: top-level groups are filled bars, subgroups are lighter and indented. */
+.group-row {
+  display: flex; align-items: center; gap: 6px;
+  margin: 8px 0 2px calc(var(--depth, 0) * 14px);
+  padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-3); color: var(--text);
+  font-weight: 600; font-size: 13px;
+  cursor: pointer; user-select: none;
+}
+.group-row.sub { margin-top: 4px; background: transparent; font-size: 12.5px; }
+.group-row:hover { border-color: #3b4552; background: #28303c; }
+.group-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.group-chevron { width: 10px; font-size: 10px; color: var(--muted); transition: transform .12s; }
+.group-row.open .group-chevron { transform: rotate(90deg); }
+.group-icon { font-size: 13px; }
+.group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-count { font-size: 10px; font-weight: 600; color: var(--muted); background: var(--bg); border-radius: 999px; padding: 0 7px; line-height: 16px; }
+.group-add { display: none; width: 20px; height: 18px; padding: 0; line-height: 14px; font-size: 13px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.group-add:hover { color: var(--text); border-color: var(--accent); }
+.group-row:hover .group-add, .group-row:focus-within .group-add { display: inline-block; }
+/* Hosts inside a group: indented with a guide line. */
+.host.nested { margin-left: calc(var(--depth, 0) * 14px + 6px); border-left: 1px solid var(--line); border-radius: 0 var(--radius) var(--radius) 0; }
 .empty { padding: 20px 10px; color: var(--muted); text-align: center; }
 .host {
   display: flex; align-items: center; gap: 8px;

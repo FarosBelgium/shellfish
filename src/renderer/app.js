@@ -176,6 +176,103 @@ function hostLabel(h) {
   return `${h.username}@${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}`;
 }
 
+// ---- sidebar: hosts in collapsible groups (subgroups: "Parent / Child") ----
+
+const COLLAPSED_KEY = 'shellfish.collapsedGroups';
+let collapsedGroups = new Set();
+try { collapsedGroups = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]')); } catch { /* storage unavailable */ }
+
+function saveCollapsed() {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedGroups])); } catch { /* storage unavailable */ }
+}
+
+const groupParts = (g) => (g || '').split('/').map((s) => s.trim()).filter(Boolean);
+
+// Builds { name, path, groups: Map, hosts: [] } from the hosts' group paths.
+function buildGroupTree(list) {
+  const root = { name: '', path: '', groups: new Map(), hosts: [] };
+  for (const h of list) {
+    let node = root;
+    for (const part of groupParts(h.group)) {
+      if (!node.groups.has(part)) {
+        node.groups.set(part, { name: part, path: node.path ? `${node.path} / ${part}` : part, groups: new Map(), hosts: [] });
+      }
+      node = node.groups.get(part);
+    }
+    node.hosts.push(h);
+  }
+  return root;
+}
+
+const countHosts = (node) => node.hosts.length + [...node.groups.values()].reduce((n, g) => n + countHosts(g), 0);
+
+function allGroupPaths(node = buildGroupTree(hosts), out = []) {
+  for (const g of node.groups.values()) { out.push(g.path); allGroupPaths(g, out); }
+  return out;
+}
+
+function hostItem(h, depth) {
+  const item = el('div', {
+    class: `host${h.color ? ' has-env' : ''}${depth ? ' nested' : ''}`,
+    style: `--depth: ${depth - 1}`,
+    title: `${hostLabel(h)}\nClick to open a terminal${h.notes ? `\n\n${h.notes}` : ''}`,
+    onclick: () => openTerminal(h),
+  },
+  el('div', { class: 'host-main' },
+    el('div', { class: 'host-name', text: h.name }),
+    el('div', { class: 'host-sub', text: hostLabel(h) }),
+    h.jumpHostId ? el('div', { class: 'host-via', text: `via ${jumpPath(h).join(' → ') || '(missing jump host)'}` }) : null),
+  h.label ? el('span', { class: 'env-badge', text: h.label }) : null,
+  el('span', { class: 'auth-badge', title: h.authType === 'key' ? 'Private key' : 'Password', text: h.authType === 'key' ? 'key' : 'pw' }),
+  el('div', { class: 'host-actions' },
+    el('button', { class: 'btn small', title: 'Open SSH terminal', text: 'SSH', onclick: (e) => { e.stopPropagation(); openTerminal(h); } }),
+    el('button', { class: 'btn small', title: 'Open SFTP file browser', text: 'SFTP', onclick: (e) => { e.stopPropagation(); openSftp(h); } }),
+    el('button', { class: 'btn small icon', title: 'Duplicate host', text: '⧉', onclick: (e) => { e.stopPropagation(); openHostEditor(h, { duplicate: true }); } }),
+    el('button', { class: 'btn small icon', title: 'Edit host', text: '✎', onclick: (e) => { e.stopPropagation(); openHostEditor(h); } })));
+  applyEnvColor(item, h);
+  return item;
+}
+
+// Renders a node's subgroups (folders first, like a file manager), then its hosts.
+function renderGroupNode(node, depth, searching, out) {
+  const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  for (const g of [...node.groups.values()].sort(byName)) {
+    const open = searching || !collapsedGroups.has(g.path);
+    const toggle = () => {
+      if (collapsedGroups.has(g.path)) collapsedGroups.delete(g.path);
+      else collapsedGroups.add(g.path);
+      saveCollapsed();
+      renderHostList();
+    };
+    out.push(el('div', {
+      class: `group-row${open ? ' open' : ''}${depth ? ' sub' : ''}`,
+      style: `--depth: ${depth}`,
+      role: 'button',
+      tabindex: '0',
+      title: `${g.path}\nClick to ${open ? 'collapse' : 'expand'}`,
+      dataset: { group: g.path },
+      onclick: toggle,
+      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } },
+    },
+    el('span', { class: 'group-chevron', text: '▸' }),
+    el('span', { class: 'group-icon', text: open ? '📂' : '📁' }),
+    el('span', { class: 'group-name', text: g.name }),
+    el('span', { class: 'group-count', text: String(countHosts(g)) }),
+    el('button', {
+      class: 'group-add', title: `New host in ${g.path}`, text: '+',
+      onclick: (e) => { e.stopPropagation(); openHostEditor(null, { group: g.path }); },
+    })));
+    if (open) renderGroupNode(g, depth + 1, searching, out);
+  }
+  for (const h of [...node.hosts].sort(byName)) out.push(hostItem(h, depth));
+}
+
+function setAllGroups(collapsed) {
+  collapsedGroups = collapsed ? new Set(allGroupPaths()) : new Set();
+  saveCollapsed();
+  renderHostList();
+}
+
 function renderHostList() {
   const list = $('#host-list');
   const q = $('#host-search').value.trim().toLowerCase();
@@ -189,45 +286,27 @@ function renderHostList() {
     el('div', { class: 'host-name', text: 'Local terminal' }),
     el('div', { class: 'host-sub', text: 'this computer' }))));
 
-  const matches = hosts
-    .filter((h) => !q || [h.name, h.host, h.username, h.group, h.label, h.notes].some((v) => v && v.toLowerCase().includes(q)))
-    .sort((a, b) => (a.group || '').localeCompare(b.group || '') || a.name.localeCompare(b.name));
-
   if (!hosts.length) {
     list.append(el('div', { class: 'empty', text: 'No saved hosts yet.' }));
     return;
   }
+  // A search also matches group names, so typing a group shows everything in it.
+  const matches = hosts.filter((h) => !q || [h.name, h.host, h.username, h.group, h.label, h.notes].some((v) => v && v.toLowerCase().includes(q)));
   if (!matches.length) {
     list.append(el('div', { class: 'empty', text: 'No matches.' }));
     return;
   }
 
-  let currentGroup;
-  for (const h of matches) {
-    const g = h.group || '';
-    if (g !== currentGroup) {
-      currentGroup = g;
-      if (g) list.append(el('div', { class: 'group-title', text: g }));
-    }
-    const item = el('div', {
-      class: `host${h.color ? ' has-env' : ''}`,
-      title: `${hostLabel(h)}\nClick to open a terminal${h.notes ? `\n\n${h.notes}` : ''}`,
-      onclick: () => openTerminal(h),
-    },
-    el('div', { class: 'host-main' },
-      el('div', { class: 'host-name', text: h.name }),
-      el('div', { class: 'host-sub', text: hostLabel(h) }),
-      h.jumpHostId ? el('div', { class: 'host-via', text: `via ${jumpPath(h).join(' → ') || '(missing jump host)'}` }) : null),
-    h.label ? el('span', { class: 'env-badge', text: h.label }) : null,
-    el('span', { class: 'auth-badge', title: h.authType === 'key' ? 'Private key' : 'Password', text: h.authType === 'key' ? 'key' : 'pw' }),
-    el('div', { class: 'host-actions' },
-      el('button', { class: 'btn small', title: 'Open SSH terminal', text: 'SSH', onclick: (e) => { e.stopPropagation(); openTerminal(h); } }),
-      el('button', { class: 'btn small', title: 'Open SFTP file browser', text: 'SFTP', onclick: (e) => { e.stopPropagation(); openSftp(h); } }),
-      el('button', { class: 'btn small icon', title: 'Duplicate host', text: '⧉', onclick: (e) => { e.stopPropagation(); openHostEditor(h, { duplicate: true }); } }),
-      el('button', { class: 'btn small icon', title: 'Edit host', text: '✎', onclick: (e) => { e.stopPropagation(); openHostEditor(h); } })));
-    applyEnvColor(item, h);
-    list.append(item);
+  const tree = buildGroupTree(matches);
+  if (tree.groups.size) {
+    list.append(el('div', { class: 'list-tools' },
+      el('span', { text: q ? `${matches.length} match${matches.length === 1 ? '' : 'es'}` : 'Hosts' }),
+      el('button', { class: 'btn small icon', title: 'Collapse all groups', text: '⊟', onclick: () => setAllGroups(true) }),
+      el('button', { class: 'btn small icon', title: 'Expand all groups', text: '⊞', onclick: () => setAllGroups(false) })));
   }
+  const rows = [];
+  renderGroupNode(tree, 0, !!q, rows);
+  list.append(...rows);
 }
 
 async function renderStoreInfo() {
@@ -407,7 +486,8 @@ function setAuthPane(type) {
 }
 
 // opts.duplicate: open a new, unsaved copy of h (including its saved secrets).
-function openHostEditor(h, { duplicate = false } = {}) {
+// opts.group: group for a new host (the "+" on a group header).
+function openHostEditor(h, { duplicate = false, group = '' } = {}) {
   form.reset();
   clearFlags = {};
   duplicateFrom = duplicate ? h.id : null;
@@ -419,7 +499,7 @@ function openHostEditor(h, { duplicate = false } = {}) {
   const f = form.elements;
   f.id.value = editing ? h.id : '';
   f.name.value = duplicate ? `${h.name} (copy)` : h?.name || '';
-  f.group.value = h?.group || '';
+  f.group.value = h?.group || group;
   f.host.value = h?.host || '';
   f.port.value = h?.port || 22;
   f.username.value = h?.username || '';
@@ -443,7 +523,7 @@ function openHostEditor(h, { duplicate = false } = {}) {
   form.querySelector('[data-clear=password]').hidden = !h?.hasPassword;
   form.querySelector('[data-clear=passphrase]').hidden = !h?.hasPassphrase;
 
-  $('#group-options').replaceChildren(...[...new Set(hosts.map((x) => x.group).filter(Boolean))].map((g) => el('option', { value: g })));
+  $('#group-options').replaceChildren(...allGroupPaths().sort().map((g) => el('option', { value: g })));
   $('#host-modal').classList.remove('hidden');
   if (duplicate) { f.host.focus(); f.host.select(); } else (h ? f.name : f.host).focus();
 }
