@@ -113,6 +113,8 @@ jobs:
           hdiutil detach /Volumes/shellfish
           app="$RUNNER_TEMP/Applications/Shellfish.app"
           codesign --verify --deep --strict --verbose=2 "$app"
+          # No one looks at the CI screen, so macOS would App Nap the app and stall its timers.
+          defaults write be.faros.shellfish NSAppSleepDisabled -bool YES
           ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/Shellfish" test/packaged-pty-test.js "$app/Contents/Resources"
           node test/update-test.js "$app/Contents/MacOS/Shellfish" dist
 

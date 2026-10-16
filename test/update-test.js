@@ -27,7 +27,11 @@ const files = [...new Set([...yml.matchAll(/^\s*(?:- url|path): (.+)$/gm)].map((
 // Feed folder: the same installer files, announced as 99.0.0.
 const feedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellfish-feed-'));
 fs.writeFileSync(path.join(feedDir, ymlName), yml.replace(/^version: .+$/m, 'version: 99.0.0'));
-for (const f of files) fs.copyFileSync(path.join(distDir, f), path.join(feedDir, f));
+for (const f of files) {
+  fs.copyFileSync(path.join(distDir, f), path.join(feedDir, f));
+  // Windows tries a differential download first, using the blockmap next to the installer.
+  if (fs.existsSync(path.join(distDir, `${f}.blockmap`))) fs.copyFileSync(path.join(distDir, `${f}.blockmap`), path.join(feedDir, `${f}.blockmap`));
+}
 if (tamper) {
   const f = path.join(feedDir, files[0]);
   const fd = fs.openSync(f, 'r+');
@@ -83,7 +87,9 @@ server.listen(0, '127.0.0.1', () => {
   const timer = setInterval(() => {
     const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
     const done = want.test(log);
-    const failed = (!tamper && /ERROR/.test(log)) || /update downloaded/.test(tamper ? log : '') || exited !== null;
+    // "Cannot download differentially, fallback to full download" is logged as ERROR but is not one.
+    const errors = log.split('\n').filter((l) => / ERROR /.test(l) && !/fallback to full download/.test(l));
+    const failed = (!tamper && errors.length > 0) || /update downloaded/.test(tamper ? log : '') || exited !== null;
     if (!done && !failed && Date.now() - t0 < 150000) return;
     clearInterval(timer);
     child.kill();

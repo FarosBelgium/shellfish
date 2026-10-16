@@ -51,6 +51,7 @@ function init(onStatus) {
   updater.autoDownload = !isMac;
   // Installing a .deb needs a password prompt, so only do that when the user clicks.
   updater.autoInstallOnAppQuit = process.platform === 'win32';
+  if (process.platform === 'win32') updater.disableWebInstaller = true; // we ship the full NSIS installer
 
   // Test hook: point the updater at a local feed. Only loopback URLs are accepted, so
   // this cannot be used to redirect updates to another machine.
@@ -70,6 +71,7 @@ function init(onStatus) {
   });
   updater.on('error', (e) => setStatus({ state: 'error', message: friendlyError(e) }));
 
+  updater.logger.info(`Shellfish ${app.getVersion()} on ${process.platform}-${process.arch}; first check in 10 s`);
   setTimeout(check, 10 * 1000); // don't slow down startup
   setInterval(check, CHECK_EVERY_MS).unref();
 }
@@ -84,6 +86,7 @@ function friendlyError(e) {
 
 function check() {
   if (!updater) return getStatus();
+  updater.logger.info(`check requested (state: ${status.state})`);
   if (['checking', 'downloading', 'ready'].includes(status.state)) return getStatus();
   updater.checkForUpdates().catch((e) => setStatus({ state: 'error', message: friendlyError(e) }));
   return getStatus();
