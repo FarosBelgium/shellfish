@@ -82,6 +82,12 @@ jobs:
           ELECTRON_RUN_AS_NODE=1 /opt/Shellfish/shellfish test/packaged-ppk-test.js /opt/Shellfish/resources
           xvfb-run -a node test/update-test.js /opt/Shellfish/shellfish dist
           xvfb-run -a node test/update-test.js /opt/Shellfish/shellfish dist --tamper
+          # Install an update for real, like a user clicking "Install & restart": pkexec runs
+          # dpkg. Nobody can type a password on CI, so allow pkexec for this user only here.
+          sudo apt-get install -y pkexec polkitd
+          printf 'polkit.addRule(function(action, subject) {\n  if (action.id == "org.freedesktop.policykit.exec" && subject.user == "%s") return polkit.Result.YES;\n});\n' "$USER" | sudo tee /etc/polkit-1/rules.d/49-ci-pkexec.rules
+          sudo systemctl restart polkit || true
+          xvfb-run -a node test/update-install-test.js /opt/Shellfish/shellfish dist
 
       - name: Install on Windows and test the installed app
         if: runner.os == 'Windows'

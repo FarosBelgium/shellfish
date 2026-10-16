@@ -71,7 +71,7 @@ function init(onStatus) {
   });
   updater.on('error', (e) => setStatus({ state: 'error', message: friendlyError(e) }));
 
-  updater.logger.info(`Shellfish ${app.getVersion()} on ${process.platform}-${process.arch}; first check in 10 s`);
+  updater.logger.info(`Shellfish ${app.getVersion()} on ${process.platform}-${process.arch}${hasNoNewPrivs() ? ' (NoNewPrivs set: installing updates needs a restart from the menu)' : ''}; first check in 10 s`);
   setTimeout(check, 10 * 1000); // don't slow down startup
   setInterval(check, CHECK_EVERY_MS).unref();
 }
@@ -81,6 +81,8 @@ function friendlyError(e) {
   if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|net::ERR_/i.test(msg)) return 'Could not reach the update server (offline?)';
   if (/404/.test(msg)) return 'No releases published yet';
   if (/sha512 checksum mismatch/i.test(msg)) return 'Downloaded update was corrupt and has been discarded';
+  if (/pkexec exited with code 126/.test(msg)) return 'Installation cancelled (no password entered)';
+  if (/pkexec exited with code 127/.test(msg)) return 'Could not ask for your password. Close Shellfish completely, start it again from the applications menu and click Install again.';
   return msg.split('\n')[0].slice(0, 200);
 }
 
@@ -92,16 +94,43 @@ function check() {
   return getStatus();
 }
 
+// Linux: Chromium starts child processes with the "no new privileges" flag, and Electron's
+// app.relaunch() passes it on to the restarted app. In such a process setuid programs stop
+// working: pkexec cannot ask for a password (so the next update fails) and sudo fails in
+// local terminals. So Shellfish restarts itself with a plain spawn instead.
+function hasNoNewPrivs() {
+  if (process.platform !== 'linux') return false;
+  try { return /^NoNewPrivs:\s*1$/m.test(fs.readFileSync('/proc/self/status', 'utf8')); } catch { return false; }
+}
+
+function relaunchCleanly(command = process.execPath, args = process.argv.slice(1)) {
+  const { spawn } = require('child_process');
+  const child = spawn(command, args, { detached: true, stdio: 'ignore', env: process.env });
+  child.unref();
+  return child;
+}
+
 function install() {
   if (!updater) return;
   if (status.state === 'available-manual') {
     shell.openExternal(RELEASES_PAGE);
     return;
   }
-  if (status.state === 'ready') {
-    // isSilent: no installer wizard on Windows; isForceRunAfter: reopen when done.
-    setImmediate(() => updater.quitAndInstall(true, true));
+  if (status.state !== 'ready') return;
+  if (process.platform === 'linux') {
+    if (hasNoNewPrivs()) {
+      // Started by an older Shellfish's update restart: pkexec can't work in this process.
+      updater.logger.warn('NoNewPrivs is set; pkexec cannot work in this process');
+      setStatus({ state: 'error', message: 'Close Shellfish completely and start it again from the applications menu, then click Install again.' });
+      return;
+    }
+    // Only fires when the .deb was installed successfully.
+    require('electron').autoUpdater.once('before-quit-for-update', () => relaunchCleanly());
+    setImmediate(() => updater.quitAndInstall(true, false));
+    return;
   }
+  // isSilent: no installer wizard on Windows; isForceRunAfter: reopen when done.
+  setImmediate(() => updater.quitAndInstall(true, true));
 }
 
-module.exports = { init, check, install, getStatus };
+module.exports = { init, check, install, getStatus, hasNoNewPrivs, relaunchCleanly };

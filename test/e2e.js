@@ -607,6 +607,28 @@ app.whenReady().then(async () => {
   });
   puttyHost.close();
 
+  if (process.platform === 'linux') {
+    console.log('\nLinux: privileges after an update restart');
+    const updater = require('../src/main/updater');
+    const nnpOf = (pid) => (/^NoNewPrivs:\s*1$/m.test(fs.readFileSync(`/proc/${pid}/status`, 'utf8')) ? 1 : 0);
+
+    await test('Shellfish restarts itself without the "no new privileges" flag (pkexec and sudo keep working)', async () => {
+      assert(!updater.hasNoNewPrivs(), 'the test process itself has NoNewPrivs set');
+      const child = updater.relaunchCleanly('sleep', ['5']);
+      await until(() => fs.existsSync(`/proc/${child.pid}/status`), 2000, 'restarted process');
+      assert(nnpOf(child.pid) === 0, 'the restarted process has NoNewPrivs set');
+      child.kill();
+    });
+
+    await test('a process that has the flag is detected (clear message instead of a pkexec error)', async () => {
+      const { execFileSync } = require('child_process');
+      const res = execFileSync('setpriv', ['--no-new-privs', process.execPath, '-e',
+        "console.log(require(process.argv[1]).hasNoNewPrivs())", path.join(__dirname, '..', 'src', 'main', 'updater.js')],
+        { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' }).trim();
+      assert(res === 'true', `hasNoNewPrivs() in a NoNewPrivs process returned ${res}`);
+    });
+  }
+
   // ---- summary ----
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed${failed.length ? `, FAILED: ${failed.map((f) => f.name).join('; ')}` : ''}`);
