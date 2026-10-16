@@ -1,10 +1,7 @@
 # Tests, builds and installs Shellfish on Linux, Windows and macOS.
 # On a version tag (v1.2.3) whose tests pass on every OS, the installers are
-# published to the public repo FarosBelgium/shellfish-releases, where the
-# in-app updater looks for them.
-#
-# Needs the repository secret RELEASES_TOKEN: a fine-grained token with
-# "Contents: read and write" on FarosBelgium/shellfish-releases only.
+# published as a GitHub Release of this repository, where the in-app updater
+# looks for them. Publishing uses the workflow's built-in GITHUB_TOKEN.
 
 name: Build
 
@@ -135,6 +132,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release; only this job gets write access
     steps:
       - uses: actions/checkout@v4
 
@@ -148,12 +147,12 @@ jobs:
           path: release
           merge-multiple: true
 
-      - name: Publish to FarosBelgium/shellfish-releases
+      - name: Publish the GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           ls -la release
           gh release create "$GITHUB_REF_NAME" release/* \
-            --repo FarosBelgium/shellfish-releases \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Shellfish ${GITHUB_REF_NAME#v}" \
             --notes "Installers for Linux (.deb), Windows (.exe) and macOS (.dmg, Apple Silicon and Intel). Installed apps update themselves from this page."

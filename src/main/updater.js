@@ -1,4 +1,4 @@
-// Automatic updates from the public release repository (GitHub Releases).
+// Automatic updates from this project's GitHub Releases (FarosBelgium/shellfish).
 //
 // - Windows: downloads in the background, installs on "Restart" or when the app quits.
 // - Linux (.deb): downloads in the background; installing asks for your password
@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const { app, shell } = require('electron');
 
-const RELEASES_PAGE = 'https://github.com/FarosBelgium/shellfish-releases/releases/latest';
+const RELEASES_PAGE = 'https://github.com/FarosBelgium/shellfish/releases/latest';
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 let updater = null;

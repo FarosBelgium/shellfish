@@ -45,15 +45,13 @@ The installed app checks for updates at startup and every 6 hours. At the bottom
 - **Linux**: the update downloads in the background. Click **Install & restart**; it asks for your password, because a `.deb` installs system-wide.
 - **macOS**: the app tells you a new version exists. **Download** opens the release page. macOS only lets apps signed with an Apple Developer certificate replace themselves.
 
-Updates come from the public repository [FarosBelgium/shellfish-releases](https://github.com/FarosBelgium/shellfish-releases), which only contains the installers; the source code stays private. Every download is checked against the SHA-512 checksum published with the release, and rejected if it doesn't match.
+Updates come from this repository's [Releases](https://github.com/FarosBelgium/shellfish/releases). Every download is checked against the SHA-512 checksum published with the release, and rejected if it doesn't match.
 
 ### Publishing a new version
 
 1. Raise `version` in `package.json` and commit.
 2. Tag and push: `git tag v1.3.1 && git push origin main v1.3.1`
-3. GitHub Actions tests and builds on Linux, Windows and macOS, installs each installer and tests the installed app. Only if everything passes does it publish the release to `shellfish-releases`; installed apps pick it up from there.
-
-One-time setup: create the public repository `FarosBelgium/shellfish-releases` (with a README, so it has a first commit). Then create a fine-grained token with **Contents: read and write** on that repository only, and add it to this repository as the Actions secret `RELEASES_TOKEN`.
+3. GitHub Actions tests and builds on Linux, Windows and macOS, installs each installer and tests the installed app. Only if everything passes does it publish a GitHub Release with the installers; installed apps pick it up from there. No extra setup or tokens are needed: the workflow uses GitHub's built-in token.
 
 ### Tests
 
