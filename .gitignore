@@ -1,0 +1,6 @@
+node_modules/
+# Saved hosts, secrets and trusted host keys: never commit
+data/
+dist/
+# Personal IDE settings
+.idea/

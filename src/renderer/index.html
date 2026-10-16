@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'">
+  <title>Shellfish</title>
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand">
+      <img class="logo" src="assets/shell.svg" alt="">
+      <span>Shellfish</span>
+    </div>
+    <div class="sidebar-actions">
+      <input id="host-search" type="search" placeholder="Search hosts…" spellcheck="false">
+      <button id="btn-new-host" class="btn primary" title="Add a host">+ New</button>
+    </div>
+    <div id="host-list"></div>
+    <div id="store-info" class="store-info"></div>
+  </aside>
+
+  <main id="main">
+    <nav id="tabbar"></nav>
+    <section id="tabviews">
+      <div id="welcome" class="welcome">
+        <h1>Shellfish</h1>
+        <p>Click a saved host to open a terminal, or use <b>SFTP</b> to browse and transfer files.</p>
+        <p class="muted">Add a host with <b>+ New</b>. Everything is stored locally in a JSON file on this machine.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Host editor -->
+  <div id="host-modal" class="modal hidden">
+    <form id="host-form" class="modal-card" autocomplete="off">
+      <h2 id="host-form-title">New host</h2>
+      <input type="hidden" name="id">
+      <div class="grid">
+        <label>Name<input name="name" placeholder="e.g. Web server" spellcheck="false"></label>
+        <label>Group<input name="group" placeholder="optional" spellcheck="false" list="group-options"></label>
+        <label class="span2">Host / IP address<input name="host" required placeholder="192.168.1.10 or server.example.com" spellcheck="false"></label>
+        <label>Port<input name="port" type="number" min="1" max="65535" value="22"></label>
+        <label>Username<input name="username" required spellcheck="false"></label>
+      </div>
+      <datalist id="group-options"></datalist>
+
+      <div class="env-field">
+        <span class="field-label">Environment colour <span class="muted">(colours the terminal, tab and sidebar)</span></span>
+        <div class="env-presets">
+          <button type="button" class="env-chip" data-label="" data-color="">None</button>
+          <button type="button" class="env-chip" data-label="DEV" data-color="#4fa3f7">Development</button>
+          <button type="button" class="env-chip" data-label="TEST" data-color="#4cc38a">Test</button>
+          <button type="button" class="env-chip" data-label="ACC" data-color="#e5b454">Acceptance</button>
+          <button type="button" class="env-chip" data-label="PROD" data-color="#e5604f">Production</button>
+        </div>
+        <div class="row">
+          <input name="label" maxlength="24" placeholder="Label, e.g. PROD" spellcheck="false">
+          <input type="hidden" name="color">
+          <label class="color-pick" title="Pick a custom colour"><input type="color" id="color-picker" value="#4fa3f7"><span id="color-swatch"></span></label>
+        </div>
+      </div>
+
+      <div class="auth-switch">
+        <label><input type="radio" name="authType" value="password" checked> Password</label>
+        <label><input type="radio" name="authType" value="key"> Private key</label>
+      </div>
+
+      <div class="auth-pane" data-auth="password">
+        <label>Password
+          <div class="row">
+            <input name="password" type="password" placeholder="leave empty to be asked on connect">
+            <button type="button" class="btn small" data-clear="password" hidden>Forget saved</button>
+          </div>
+        </label>
+      </div>
+      <div class="auth-pane hidden" data-auth="key">
+        <label>Private key file
+          <div class="row">
+            <input name="privateKeyPath" placeholder="~/.ssh/id_ed25519" spellcheck="false">
+            <button type="button" class="btn small" id="btn-pick-key">Browse…</button>
+          </div>
+        </label>
+        <label>Key passphrase
+          <div class="row">
+            <input name="passphrase" type="password" placeholder="only if the key is encrypted">
+            <button type="button" class="btn small" data-clear="passphrase" hidden>Forget saved</button>
+          </div>
+        </label>
+      </div>
+
+      <label>Notes<textarea name="notes" rows="2" spellcheck="false"></textarea></label>
+      <p id="host-form-error" class="error"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn danger" id="btn-delete-host">Delete</button>
+        <button type="button" class="btn" id="btn-duplicate-host" title="Save a copy of this host that you can adjust">Duplicate</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Generic prompt / confirm dialog -->
+  <div id="dialog-modal" class="modal hidden">
+    <form id="dialog-form" class="modal-card small">
+      <h2 id="dialog-title"></h2>
+      <p id="dialog-message"></p>
+      <input id="dialog-input" spellcheck="false">
+      <div class="modal-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="dialog-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="dialog-ok">OK</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

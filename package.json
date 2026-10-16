@@ -1,0 +1,102 @@
+{
+  "name": "shellfish",
+  "version": "1.1.0",
+  "description": "Saved-host SSH terminal and dual-pane SFTP client",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "setup:linux": "bash scripts/setup-linux-sandbox.sh",
+    "dist": "electron-builder --linux deb",
+    "icons": "electron scripts/render-icon.js src/renderer/assets/shell.svg build/icon.png 1024 && electron scripts/render-icon.js src/renderer/assets/shell.svg src/renderer/assets/icon.png 256",
+    "dist:win": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac dmg --universal",
+    "dist:all": "electron-builder --linux deb --win nsis",
+    "dist:mac-from-linux": "electron-builder --mac dir --arm64 --x64 && bash scripts/zip-mac.sh"
+  },
+  "author": {
+    "name": "Ruben Schroyen",
+    "email": "Ruben.schroyen@faros.be"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "electron": "^44.8.0",
+    "electron-builder": "^26.15.3"
+  },
+  "private": true,
+  "productName": "Shellfish",
+  "build": {
+    "appId": "be.faros.shellfish",
+    "productName": "Shellfish",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/node_modules/cpu-features/**",
+      "!**/node_modules/ssh2/lib/protocol/crypto/build/**",
+      "!**/node_modules/buildcheck/**",
+      "!**/node_modules/nan/**"
+    ],
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "category": "Network;RemoteAccess",
+      "icon": "build/icon.png",
+      "executableName": "shellfish",
+      "synopsis": "SSH terminal and SFTP client for saved hosts",
+      "syncDesktopName": true
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0 | libgtk-3-0t64",
+        "libnss3",
+        "libxss1",
+        "libasound2 | libasound2t64",
+        "libsecret-1-0"
+      ]
+    },
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Shellfish",
+      "artifactName": "Shellfish-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "artifactName": "Shellfish-${version}-mac.${ext}"
+    }
+  },
+  "homepage": "https://faros.be",
+  "desktopName": "shellfish.desktop"
+}

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fafafb"/>
+      <stop offset="1" stop-color="#cdd0d6"/>
+    </linearGradient>
+    <linearGradient id="lip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd9c4"/>
+      <stop offset="1" stop-color="#f6b08c"/>
+    </linearGradient>
+    <clipPath id="clip">
+      <path id="outline" d="M256 30
+        C 272 30 284 52 290 70
+        C 306 78 314 98 318 116
+        C 336 128 346 150 352 172
+        C 414 222 448 318 412 402
+        C 380 474 280 496 212 470
+        C 150 446 120 372 134 292
+        C 144 236 160 196 182 168
+        C 184 146 192 124 206 110
+        C 210 88 220 66 232 54
+        C 238 40 246 30 256 30 Z"/>
+    </clipPath>
+  </defs>
+  <g transform="translate(256 262) scale(.86) rotate(-38) translate(-256 -262)">
+    <use href="#outline" fill="url(#body)" stroke="#a3a6ad" stroke-width="10" stroke-linejoin="round"/>
+    <g clip-path="url(#clip)" fill="none" stroke="#b2b5bc" stroke-width="16" stroke-linecap="round">
+      <path d="M220 64 C 240 78 268 80 296 70"/>
+      <path d="M196 116 C 228 136 280 136 324 114"/>
+      <path d="M168 176 C 214 210 300 210 360 170"/>
+      <path d="M128 292 C 170 336 236 346 290 330"/>
+    </g>
+    <g fill="#ffffff">
+      <ellipse cx="258" cy="96" rx="16" ry="9" transform="rotate(-14 258 96)"/>
+      <ellipse cx="258" cy="152" rx="24" ry="12" transform="rotate(-12 258 152)"/>
+      <ellipse cx="232" cy="236" rx="34" ry="16" transform="rotate(-10 232 236)"/>
+    </g>
+    <path d="M352 174 C 424 226 444 326 408 400 C 384 448 334 466 290 456 C 330 406 338 330 320 266 C 310 230 322 196 352 174 Z" fill="#f2a35e"/>
+    <path d="M354 214 C 404 258 414 334 388 386 C 372 420 342 436 314 436 C 342 394 348 326 336 274 C 330 246 336 228 354 214 Z" fill="url(#lip)"/>
+  </g>
+</svg>
