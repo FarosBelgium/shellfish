@@ -1,10 +1,15 @@
 const path = require('path');
+const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const { Store } = require('./store');
 const ssh = require('./ssh');
 const updater = require('./updater');
+const importer = require('./importer');
+
+// Parsed imports waiting for the user's choice in the preview. Secrets stay here.
+const pendingImports = new Map();
 
 // The OS keyring key used to encrypt saved secrets is tied to the app name, so keep it
 // fixed: renaming the app would make every saved password undecryptable.
@@ -64,6 +69,36 @@ function registerIpc() {
   handle('hosts:delete', (_e, id) => store.deleteHost(id));
   handle('store:info', () => ({ dir: store.dir, file: store.hostsFile, encrypted: store.canEncrypt() }));
   handle('store:reveal', () => shell.showItemInFolder(store.hostsFile));
+  handle('import:open', async (_e, { sshConfig } = {}) => {
+    let file = path.join(os.homedir(), '.ssh', 'config');
+    if (!sshConfig) {
+      const r = await dialog.showOpenDialog(win, {
+        title: 'Import hosts',
+        defaultPath: os.homedir(),
+        properties: ['openFile', 'showHiddenFiles'],
+        filters: [{ name: 'SSH config or CSV', extensions: ['*'] }, { name: 'CSV', extensions: ['csv'] }],
+      });
+      if (r.canceled) return null;
+      file = r.filePaths[0];
+    }
+    if (!fs.existsSync(file)) throw new Error(`${file} does not exist`);
+    const existing = store.listHosts();
+    const result = importer.analyze(file, existing);
+    const id = require('crypto').randomUUID();
+    pendingImports.clear(); // only the latest preview can be applied
+    pendingImports.set(id, result);
+    return {
+      id, file, format: result.format, warnings: result.warnings,
+      hosts: result.candidates.map((c) => importer.preview(c, result.candidates, existing)),
+    };
+  });
+  handle('import:apply', (_e, id, keys, group) => {
+    const result = pendingImports.get(id);
+    if (!result) throw new Error('This import has expired; open the file again');
+    pendingImports.delete(id);
+    return importer.apply(store, result, keys, group);
+  });
+  handle('import:cancel', () => { pendingImports.clear(); });
   handle('update:status', () => updater.getStatus());
   handle('update:check', () => updater.check());
   handle('update:install', () => updater.install());

@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('api', {
     reveal: () => invoke('store:reveal'),
   },
   pickKey: () => invoke('dialog:pickKey'),
+  importer: {
+    open: (opts) => invoke('import:open', opts),
+    apply: (id, keys, group) => invoke('import:apply', id, keys, group),
+    cancel: () => invoke('import:cancel'),
+  },
   updates: {
     status: () => invoke('update:status'),
     check: () => invoke('update:check'),

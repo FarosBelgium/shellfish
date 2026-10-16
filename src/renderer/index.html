@@ -17,6 +17,7 @@
     <div class="sidebar-actions">
       <input id="host-search" type="search" placeholder="Search hosts…" spellcheck="false">
       <button id="btn-new-host" class="btn primary" title="Add a host">+ New</button>
+      <button id="btn-import" class="btn" title="Import hosts from Termius (CSV) or an SSH config file">Import</button>
     </div>
     <div id="host-list"></div>
     <div id="update-box" class="update-box"></div>
@@ -111,6 +112,11 @@
         <button type="submit" class="btn primary">Save</button>
       </div>
     </form>
+  </div>
+
+  <!-- Import hosts -->
+  <div id="import-modal" class="modal hidden">
+    <div class="modal-card import-card" id="import-card"></div>
   </div>
 
   <!-- Generic prompt / confirm dialog -->

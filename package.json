@@ -1,6 +1,6 @@
 {
   "name": "shellfish",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Saved-host SSH terminal and dual-pane SFTP client",
   "main": "src/main/main.js",
   "scripts": {
@@ -13,7 +13,8 @@
     "dist:all": "electron-builder --linux deb --win nsis --publish never",
     "dist:mac-from-linux": "electron-builder --mac dir --arm64 --x64 --publish never && bash scripts/zip-mac.sh",
     "test": "electron test/e2e.js",
-    "postinstall": "node scripts/fix-node-pty.js"
+    "postinstall": "node scripts/fix-node-pty.js",
+    "test:headless": "bash scripts/headless.sh electron test/e2e.js"
   },
   "author": {
     "name": "Ruben Schroyen",

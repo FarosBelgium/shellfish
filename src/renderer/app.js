@@ -135,6 +135,7 @@ function alertError(title, err) {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('#dialog-modal').classList.contains('hidden')) dialogResolve && dialogResolve(null);
+  else if (!$('#import-modal').classList.contains('hidden')) closeImport();
   else if (!$('#host-modal').classList.contains('hidden')) closeHostEditor();
 });
 
@@ -271,6 +272,109 @@ function renderUpdate(st) {
 
 api.updates.onStatus(renderUpdate);
 api.updates.status().then((r) => r.ok && renderUpdate(r.data));
+
+// ---- import (Termius CSV / SSH config) ----
+
+const TERMIUS_HELP = 'https://github.com/y01and3/termius-export';
+
+function closeImport() {
+  $('#import-modal').classList.add('hidden');
+  $('#import-card').replaceChildren();
+  api.importer.cancel(); // drop parsed secrets in the main process
+}
+
+function openImport() {
+  const card = $('#import-card');
+  card.replaceChildren(
+    el('h2', { text: 'Import hosts' }),
+    el('p', { class: 'muted', text: 'From Termius, an OpenSSH config file, or a CSV file. You get a preview first.' }),
+    el('div', { class: 'import-choices' },
+      el('button', { class: 'btn primary', text: 'Choose a file…', onclick: () => loadImport({}) }),
+      el('button', { class: 'btn', text: 'Import ~/.ssh/config', onclick: () => loadImport({ sshConfig: true }) })),
+    el('div', { class: 'import-help' },
+      el('b', { text: 'From Termius' }),
+      el('p', { text: 'Termius no longer has an export function. The open-source tool termius-export reads your Termius data on this computer (offline) and writes hosts.csv and sshconfig files.' }),
+      el('ol', {},
+        el('li', { text: 'Run termius-export (see its README) with Termius closed.' }),
+        el('li', { text: 'Choose its hosts.csv here: that includes passwords, which Shellfish stores encrypted. sshconfig works too, without passwords.' }),
+        el('li', { text: 'Delete the exported files afterwards: they contain your passwords and keys in plain text.' })),
+      el('code', { text: TERMIUS_HELP })),
+    el('p', { class: 'error', id: 'import-error' }),
+    el('div', { class: 'modal-actions' }, el('span', { class: 'spacer' }), el('button', { class: 'btn', text: 'Cancel', onclick: closeImport })));
+  $('#import-modal').classList.remove('hidden');
+}
+
+async function loadImport(opts) {
+  let res;
+  try {
+    res = await call(api.importer.open(opts));
+  } catch (e) {
+    $('#import-error').textContent = e.message;
+    return;
+  }
+  if (!res) return; // file dialog cancelled
+  showImportPreview(res);
+}
+
+function showImportPreview(res) {
+  const card = $('#import-card');
+  const importable = res.hosts.filter((h) => !h.exists);
+  const checks = new Map();
+  const count = el('span');
+  const importBtn = el('button', { class: 'btn primary' });
+  const update = () => {
+    const n = [...checks.values()].filter((c) => c.checked).length;
+    count.textContent = `${n} of ${res.hosts.length} selected`;
+    importBtn.textContent = n ? `Import ${n} host${n === 1 ? '' : 's'}` : 'Import';
+    importBtn.disabled = !n;
+  };
+  const rows = res.hosts.map((h) => {
+    const box = el('input', { type: 'checkbox', checked: !h.exists, disabled: h.exists, onchange: update });
+    checks.set(h.key, box);
+    const auth = h.authType === 'key' ? `key ${h.privateKeyPath}` : h.hasPassword ? 'password (saved)' : 'password (asked)';
+    return el('tr', { class: h.exists ? 'exists' : '' },
+      el('td', {}, box),
+      el('td', { title: h.name }, el('b', { text: h.name }), h.group ? el('div', { class: 'muted', text: h.group }) : null),
+      el('td', { class: 'mono', text: `${h.username || '?'}@${h.host}${h.port !== 22 ? `:${h.port}` : ''}` }),
+      el('td', { class: 'mono small', title: auth, text: auth }),
+      el('td', { text: h.via.length ? `via ${h.via.join(' → ')}` : '' }),
+      el('td', { class: 'small' },
+        h.exists ? el('div', { class: 'muted', text: 'already saved' }) : null,
+        ...h.warnings.map((w) => el('div', { class: 'warn', text: w }))));
+  });
+  const all = el('input', { type: 'checkbox', checked: importable.length > 0, onchange: (e) => { for (const [k, c] of checks) if (!c.disabled) c.checked = e.target.checked; update(); } });
+  const group = el('input', { placeholder: 'keep the groups from the file', spellcheck: 'false', list: 'group-options' });
+
+  importBtn.addEventListener('click', async () => {
+    const keys = [...checks].filter(([, c]) => c.checked).map(([k]) => k);
+    importBtn.disabled = true;
+    try {
+      const r = await call(api.importer.apply(res.id, keys, group.value.trim()));
+      $('#import-modal').classList.add('hidden');
+      await loadHosts();
+      const extra = r.pulledIn.length ? `\n\nAlso added as jump host${r.pulledIn.length === 1 ? '' : 's'}: ${r.pulledIn.join(', ')}` : '';
+      openDialog({ title: 'Import done', message: `Added ${r.added.length} host${r.added.length === 1 ? '' : 's'}.${extra}\n\nHosts without a saved password ask for it on first connect.`, okText: 'OK' });
+    } catch (e) {
+      $('#import-error').textContent = e.message;
+      importBtn.disabled = false;
+    }
+  });
+
+  card.replaceChildren(
+    el('h2', { text: `Import from ${res.format}` }),
+    el('p', { class: 'muted mono small', text: res.file }),
+    ...res.warnings.map((w) => el('p', { class: 'warn', text: w })),
+    el('div', { class: 'import-table-wrap' },
+      el('table', { class: 'import-table' },
+        el('thead', {}, el('tr', {}, el('th', {}, all), el('th', { text: 'Name' }), el('th', { text: 'Address' }), el('th', { text: 'Login' }), el('th', { text: 'Route' }), el('th', { text: 'Notes' }))),
+        el('tbody', {}, ...rows))),
+    el('label', { class: 'import-group' }, 'Put the imported hosts in group', group),
+    el('p', { class: 'error', id: 'import-error' }),
+    el('div', { class: 'modal-actions' }, count, el('span', { class: 'spacer' }), el('button', { class: 'btn', text: 'Cancel', onclick: closeImport }), importBtn));
+  update();
+}
+
+$('#btn-import').addEventListener('click', openImport);
 
 $('#host-search').addEventListener('input', renderHostList);
 $('#btn-new-host').addEventListener('click', () => openHostEditor(null));

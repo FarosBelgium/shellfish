@@ -18,6 +18,7 @@ function generateKey(type = 'ed25519', opts = {}) {
   }
 }
 
+// `username` may be a list of accepted user names.
 function startServer({ name, username = 'tester', password, publicKey, allowForwarding = true, root }) {
   const hostKey = generateKey().private;
   const allowedKey = publicKey ? utils.parseKey(publicKey) : null;
@@ -30,7 +31,7 @@ function startServer({ name, username = 'tester', password, publicKey, allowForw
     client.on('error', () => {});
 
     client.on('authentication', (ctx) => {
-      if (ctx.username !== username) { stats.authFailures++; return ctx.reject(); }
+      if (![].concat(username).includes(ctx.username)) { stats.authFailures++; return ctx.reject(); }
       if (ctx.method === 'password' && password) {
         if (ctx.password === password) return ctx.accept();
         stats.authFailures++;

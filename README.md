@@ -57,6 +57,8 @@ Updates come from this repository's [Releases](https://github.com/FarosBelgium/s
 npm test
 ```
 
+(On Linux, `npm run test:headless` runs the same tests on a virtual display, so no windows pop up.)
+
 This runs the end-to-end tests in Electron, against SSH servers the tests start themselves (two jump hosts and a target server): jump host chains, password prompts per hop, host key checks, SFTP through a tunnel, the local terminal and the UI. GitHub Actions runs them on Linux, Windows and macOS, on every push. It also tests the installed apps: the local terminal, and the updater against a local update feed, including rejecting a tampered download.
 
 ### Building the installers
@@ -92,6 +94,7 @@ Don't use `--no-sandbox`: it switches off a layer of protection. Re-run the setu
 - **Saved hosts** in the sidebar, with search and optional groups. Click a host to open an SSH terminal; hover it for **SSH**, **SFTP**, **⧉ duplicate** and **✎ edit**.
 - **Jump hosts / SSH tunnel**: under **Connect via** in the host editor, pick another saved host to tunnel through (like `ssh -J`). Chains work too: a jump host can have its own jump host (A → B → server). SSH and SFTP both go through the tunnel. Every hop gets its own host key check and password prompt. The sidebar shows the route (`↳ via bastion → internal`).
 - **Saved commands**: save frequently used commands per host (host editor → **Saved commands**, or **+** in the terminal's command bar, which fills in the selected terminal text). They show as buttons above the terminal. A click pastes the command, so you can review it and press Enter yourself. Tick **Run** for a command to press Enter for you. Right-click a button to edit the host's commands.
+- **Import** hosts with the **Import** button: from Termius, from an OpenSSH config file (`~/.ssh/config` with one click), or from a CSV file. A preview shows what will be added. Hosts you already have are skipped, and jump hosts (`ProxyJump`, `ProxyCommand ssh -W`) are linked automatically. See [Importing from Termius](#importing-from-termius).
 - **Duplicate** a host (⧉ in the sidebar, or **Duplicate** in the editor) to create a similar one. Everything is copied, including the saved password, so you only change what's different (e.g. the IP address).
 - **Environment colours**: give a host a colour and label (presets: Development, Test, Acceptance, Production, or pick your own). The terminal gets a coloured frame, a banner with the label and a tinted background. The tab, the sidebar entry and the SFTP server pane are coloured too, so you can see at a glance whether you're on production.
 - **Authentication** with username + password, or username + private key (with an optional passphrase). If a password or passphrase isn't saved, or is wrong, you're asked for it when you connect, and that one isn't saved.
@@ -103,6 +106,19 @@ Don't use `--no-sandbox`: it switches off a layer of protection. Re-run the setu
   - New folder, rename (`F2`), delete (`Del`). Local deletes go to the trash. Remote deletes are permanent and ask for confirmation first.
   - Asks before overwriting. The transfer panel shows progress.
 - Tabs: `Ctrl+Shift+T` for a new local terminal, `Ctrl+Tab` to cycle, `Ctrl+Shift+W` or middle-click to close.
+
+## Importing from Termius
+
+Termius no longer has an export function and keeps your hosts encrypted on disk. The open-source tool [termius-export](https://github.com/y01and3/termius-export) (MIT) reads that data on your own computer, offline, and writes it to files Shellfish can import:
+
+1. Close Termius and run termius-export (see its README). It writes `hosts.csv`, `sshconfig` and a `keys/` folder.
+2. In Shellfish, click **Import → Choose a file…** and pick `hosts.csv`. This includes saved passwords and key passphrases, which Shellfish stores encrypted right away. (`sshconfig` works too, but without passwords.)
+3. Check the preview, optionally choose a group, and click **Import**.
+4. Delete the exported files afterwards: they contain your passwords and keys in plain text. If you deleted the `keys/` folder, first copy the keys you use to `~/.ssh` and update the key path in the host editor.
+
+What's imported: name, address, port, user, password or key file (+ passphrase), group (`Group/Subgroup` becomes `Group / Subgroup`) and tags (into the notes). Not supported, and reported in the preview: telnet/mosh hosts, SOCKS/HTTP proxies, port forwards and `Match` blocks.
+
+From an OpenSSH config, Shellfish reads `Host`, `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`, `ProxyCommand ssh -W %h:%p …`, `Include`, and defaults from `Host *`. Hosts without an `IdentityFile` use your default key (`~/.ssh/id_ed25519`, `id_ecdsa` or `id_rsa`), just like `ssh`.
 
 ## Where your data is stored
 

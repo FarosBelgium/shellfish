@@ -13,6 +13,9 @@ process.env.SHELLFISH_DATA_DIR = path.join(tmp, 'data');
 
 // Host key dialogs: always "trust", but record which hosts asked.
 const hostKeyPrompts = [];
+// File dialogs: return whatever the test sets here.
+let nextOpenFile = null;
+dialog.showOpenDialog = async () => (nextOpenFile ? { canceled: false, filePaths: [nextOpenFile] } : { canceled: true, filePaths: [] });
 dialog.showMessageBox = async (_win, opts) => {
   hostKeyPrompts.push(opts.message);
   return { response: 1 };
@@ -21,6 +24,7 @@ dialog.showMessageBox = async (_win, opts) => {
 require('../src/main/main.js'); // the real app: window, IPC, store
 const { Store } = require('../src/main/store');
 const ssh = require('../src/main/ssh');
+const importer = require('../src/main/importer');
 
 const results = [];
 async function test(name, fn) {
@@ -76,9 +80,10 @@ app.whenReady().then(async () => {
   const remoteRoot = path.join(tmp, 'remote');
   fs.mkdirSync(remoteRoot);
 
-  const jump1 = await startServer({ name: 'jump1', password: 'jump1-pass' });
+  // 'importer' is the user of the hosts the import tests create (so they are not duplicates).
+  const jump1 = await startServer({ name: 'jump1', username: ['tester', 'importer'], password: 'jump1-pass' });
   const jump2 = await startServer({ name: 'jump2', publicKey: keyPair.public });
-  const target = await startServer({ name: 'target', password: 'target-pass', root: remoteRoot });
+  const target = await startServer({ name: 'target', username: ['tester', 'importer', 'importer2'], password: 'target-pass', root: remoteRoot });
   const noFwd = await startServer({ name: 'nofwd', password: 'nofwd-pass', allowForwarding: false });
 
   const store = new Store(process.env.SHELLFISH_DATA_DIR);
@@ -364,6 +369,126 @@ app.whenReady().then(async () => {
     await wait(300);
     assert(!(await js(`!!document.querySelector('.tabview.active .cmd-bar')`)), 'local terminal shows a command bar');
     await js('closeTab(activeTab)');
+  });
+
+  console.log('\nImport (Termius CSV / SSH config)');
+  const impDir = path.join(tmp, 'import');
+  fs.mkdirSync(path.join(impDir, 'config.d'), { recursive: true });
+  fs.mkdirSync(path.join(impDir, 'keys'));
+  fs.writeFileSync(path.join(impDir, 'keys', 'id_extra'), 'x');
+  fs.writeFileSync(path.join(impDir, 'config'), [
+    '# comment',
+    'Include config.d/*',
+    'Host bastion',
+    '    HostName 127.0.0.1',
+    `    Port ${jump1.port}`,
+    '    User importer',
+    'Host inner',
+    '    HostName 127.0.0.1',
+    `    Port ${target.port}`,
+    '    User importer2',
+    '    ProxyJump bastion',
+    'Host legacy',
+    '    HostName 10.0.0.5',
+    '    ProxyCommand ssh -W %h:%p bastion',
+    'Host web-*',
+    '    User www',
+    'Match host foo',
+    '    User nope',
+    'Host *',
+    '    User defaultuser',
+    '    ServerAliveInterval 30',
+  ].join('\n'));
+  fs.writeFileSync(path.join(impDir, 'config.d', 'extra'), [
+    'Host extra',
+    '  HostName=extra.example.com',
+    '  IdentityFile keys/id_extra',
+    '  ProxyJump admin@gateway.example.com:2222,jumpbox.example.com',
+  ].join('\n'));
+  // Exactly the columns termius-export writes (Termius' import template plus key/proxy columns).
+  const csvFile = path.join(impDir, 'hosts.csv');
+  fs.writeFileSync(csvFile, [
+    'Groups,Label,Tags,Hostname,Protocol,Port,Username,Password,IdentityFile,KeyLabel,KeyPassphrase,ProxyType,ProxyHost,ProxyPort',
+    `Klant B/Prod,csv-target,"web,prod",127.0.0.1,ssh,${target.port},importer,target-pass,,,,,,`,
+    ',old switch,,10.0.0.9,telnet,23,admin,,,,,,,',
+    ',"Web, ""main""",,web1.example.com,ssh,2200,deploy,,keys/id_extra,deploy-key,secret-pp,,,',
+  ].join('\r\n') + '\r\n');
+
+  await test('SSH config: hosts, Host * defaults, Include, ProxyJump and ProxyCommand -W', async () => {
+    const r = importer.analyze(path.join(impDir, 'config'), store.listHosts());
+    const by = (n) => r.candidates.find((c) => c.name === n);
+    assert(!by('web-*') && !r.candidates.some((c) => c.username === 'nope'), 'wildcard/Match blocks must be skipped');
+    assert(by('bastion').port === jump1.port && by('bastion').username === 'importer', 'bastion');
+    assert(by('inner').jump && by('inner').jump.candidate === by('bastion').key, 'inner should go via bastion');
+    assert(by('legacy').jump && by('legacy').jump.candidate === by('bastion').key, 'ProxyCommand ssh -W should become a jump host');
+    assert(by('legacy').username === 'defaultuser', 'Host * default user not applied');
+    const extra = by('extra');
+    assert(extra && extra.host === 'extra.example.com', 'Include not followed');
+    assert(extra.authType === 'key' && extra.privateKeyPath === path.join(impDir, 'keys', 'id_extra'), `key path ${extra.privateKeyPath}`);
+    const jb = r.candidates.find((c) => c.key === extra.jump.candidate);
+    const gw = r.candidates.find((c) => c.key === jb.jump.candidate);
+    assert(jb.host === 'jumpbox.example.com' && gw.host === 'gateway.example.com' && gw.port === 2222 && gw.username === 'admin', 'ProxyJump chain');
+    const pv = importer.preview(extra, r.candidates, store.listHosts());
+    assert(pv.via.join(' → ') === 'gateway.example.com → jumpbox.example.com', `preview route: ${pv.via.join(' → ')}`);
+  });
+
+  await test('CSV (Termius / termius-export): columns, quotes, skipped protocols, keys', async () => {
+    const r = importer.analyze(csvFile, store.listHosts());
+    assert(r.format === 'CSV' && r.candidates.length === 2, `got ${r.candidates.length} hosts`);
+    assert(r.warnings.some((w) => /telnet is not supported/.test(w)), 'telnet row should be reported');
+    const [a, b] = r.candidates;
+    assert(a.name === 'csv-target' && a.group === 'Klant B / Prod' && a.password === 'target-pass' && a.notes === 'Tags: web,prod', JSON.stringify({ ...a, password: !!a.password }));
+    assert(b.name === 'Web, "main"' && b.port === 2200 && b.authType === 'key' && b.passphrase === 'secret-pp' && b.privateKeyPath === path.join(impDir, 'keys', 'id_extra'), JSON.stringify({ ...b, passphrase: !!b.passphrase }));
+    assert(!JSON.stringify(importer.preview(a, r.candidates, [])).includes('target-pass'), 'the preview must not contain passwords');
+    assert(!b.warnings.some((w) => /key file not found/.test(w)), 'existing key reported as missing');
+    fs.writeFileSync(path.join(impDir, 'missing-key.csv'), 'Label,Hostname,Username,IdentityFile\nx,h.example.com,u,keys/nope\n');
+    const m = importer.analyze(path.join(impDir, 'missing-key.csv'), []);
+    assert(m.candidates[0].warnings.some((w) => /key file not found/.test(w)), 'missing key should be reported');
+  });
+
+  await test('imported CSV host connects with its imported (encrypted) password', async () => {
+    const r = importer.analyze(csvFile, store.listHosts());
+    const res = importer.apply(store, r, [r.candidates[0].key], '');
+    assert(res.added.length === 1, JSON.stringify(res));
+    const saved = store.listHosts().find((h) => h.name === 'csv-target');
+    const raw = fs.readFileSync(path.join(process.env.SHELLFISH_DATA_DIR, 'hosts.json'), 'utf8');
+    assert(!raw.includes('target-pass') || !store.canEncrypt(), 'password stored in plain text although encryption is available');
+    const { r: sh } = await shellRoundTrip(saved.id);
+    ssh.closeSession(sh.id);
+    const again = importer.analyze(csvFile, store.listHosts());
+    assert(again.candidates[0].existingId === saved.id, 'second import should recognise the saved host');
+  });
+
+  await test('importing a host also adds the jump hosts it needs, and connects through them', async () => {
+    const r = importer.analyze(path.join(impDir, 'config'), store.listHosts());
+    const inner = r.candidates.find((c) => c.name === 'inner');
+    const res = importer.apply(store, r, [inner.key], 'Imported');
+    assert(res.added.join(',') === 'bastion,inner' && res.pulledIn.join(',') === 'bastion', JSON.stringify(res));
+    const hs = store.listHosts();
+    const hInner = hs.find((h) => h.name === 'inner');
+    const bastionId = hs.find((h) => h.name === 'bastion').id;
+    assert(hInner.jumpHostId === bastionId && hInner.group === 'Imported', 'jump link / group');
+    // The config has no passwords: supply them like the password prompts would.
+    const { r: sh } = await shellRoundTrip(hInner.id, { secrets: { [bastionId]: { password: 'jump1-pass' }, [hInner.id]: { password: 'target-pass' } } });
+    ssh.closeSession(sh.id);
+  });
+
+  await test('import through the UI: choose file, preview, import', async () => {
+    nextOpenFile = csvFile;
+    await js(`document.querySelector('#btn-import').click()`);
+    await until(() => js(`!document.querySelector('#import-modal').classList.contains('hidden')`), 3000, 'import window');
+    await js(`[...document.querySelectorAll('#import-card button')].find(b => b.textContent.startsWith('Choose a file')).click()`);
+    await until(() => js(`document.querySelectorAll('.import-table tbody tr').length === 2`), 5000, 'preview rows');
+    const rows = await js(`[...document.querySelectorAll('.import-table tbody tr')].map(r => ({ text: r.textContent, checked: r.querySelector('input').checked, disabled: r.querySelector('input').disabled }))`);
+    assert(rows[0].disabled && /already saved/.test(rows[0].text), 'existing host should be shown as already saved');
+    assert(rows[1].checked && !rows[1].disabled && /Web, "main"/.test(rows[1].text), JSON.stringify(rows));
+    assert(!(await js(`document.querySelector('#import-card').textContent`)).includes('secret-pp'), 'passphrase leaked into the UI');
+    await js(`[...document.querySelectorAll('#import-card button')].find(b => b.textContent.startsWith('Import 1')).click()`);
+    await until(() => js(`hosts.some(h => h.name === 'Web, "main"')`), 5000, 'imported host in the sidebar');
+    await until(() => js(`/Added 1 host/.test(document.querySelector('#dialog-message').textContent)`), 3000, 'done message');
+    await js(`document.querySelector('#dialog-ok').click()`);
+    assert(store.getHost(store.listHosts().find((h) => h.name === 'Web, "main"').id).passphrase, 'passphrase not saved');
+    nextOpenFile = null;
   });
 
   // ---- summary ----
