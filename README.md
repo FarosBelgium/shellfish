@@ -91,6 +91,7 @@ Don't use `--no-sandbox`: it switches off a layer of protection. Re-run the setu
 
 - **Saved hosts** in the sidebar, with search and optional groups. Click a host to open an SSH terminal; hover it for **SSH**, **SFTP**, **⧉ duplicate** and **✎ edit**.
 - **Jump hosts / SSH tunnel**: under **Connect via** in the host editor, pick another saved host to tunnel through (like `ssh -J`). Chains work too: a jump host can have its own jump host (A → B → server). SSH and SFTP both go through the tunnel. Every hop gets its own host key check and password prompt. The sidebar shows the route (`↳ via bastion → internal`).
+- **Saved commands**: save frequently used commands per host (host editor → **Saved commands**, or **+** in the terminal's command bar, which fills in the selected terminal text). They show as buttons above the terminal. A click pastes the command, so you can review it and press Enter yourself. Tick **Run** for a command to press Enter for you. Right-click a button to edit the host's commands.
 - **Duplicate** a host (⧉ in the sidebar, or **Duplicate** in the editor) to create a similar one. Everything is copied, including the saved password, so you only change what's different (e.g. the IP address).
 - **Environment colours**: give a host a colour and label (presets: Development, Test, Acceptance, Production, or pick your own). The terminal gets a coloured frame, a banner with the label and a tinted background. The tab, the sidebar entry and the SFTP server pane are coloured too, so you can see at a glance whether you're on production.
 - **Authentication** with username + password, or username + private key (with an optional passphrase). If a password or passphrase isn't saved, or is wrong, you're asked for it when you connect, and that one isn't saved.
@@ -129,6 +130,10 @@ Example `hosts.json`:
       "username": "deploy",
       "authType": "key",
       "jumpHostId": "",
+      "commands": [
+        { "name": "Disk usage", "command": "df -h", "run": true },
+        { "name": "Restart app", "command": "sudo systemctl restart myapp", "run": false }
+      ],
       "password": "",
       "privateKeyPath": "~/.ssh/id_ed25519",
       "passphrase": "enc:djExE8xQTafSNaelqU6/XVUDJg==",
@@ -138,7 +143,7 @@ Example `hosts.json`:
 }
 ```
 
-You can edit this file by hand. To add a host, leave `id` out and one is generated. `authType` is `"password"` or `"key"`. `label` and `color` (`#rrggbb`) are optional. `jumpHostId` is the `id` of the host to connect through (empty = direct).
+You can edit this file by hand. To add a host, leave `id` out and one is generated. `authType` is `"password"` or `"key"`. `label` and `color` (`#rrggbb`) are optional. `jumpHostId` is the `id` of the host to connect through (empty = direct). In `commands`, `run: true` means Enter is pressed after pasting.
 
 ## Security
 

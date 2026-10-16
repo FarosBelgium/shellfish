@@ -147,6 +147,7 @@ class Store {
       privateKeyPath: str(input.privateKeyPath),
       passphrase: existing?.passphrase || source?.passphrase || '',
       notes: str(input.notes),
+      commands: cleanCommands(input.commands),
     };
 
     if (!host.host) throw new Error('Host / IP address is required');
@@ -196,6 +197,20 @@ class Store {
     all[key] = { ...entry, trustedAt: new Date().toISOString() };
     this._write(this.knownHostsFile, all);
   }
+}
+
+// Saved commands: [{ name, command, run }]. `run` = press Enter after pasting.
+function cleanCommands(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((c) => ({
+      name: str(c && c.name).slice(0, 60),
+      command: typeof (c && c.command) === 'string' ? c.command.replace(/\r\n?/g, '\n').replace(/\n+$/, '').slice(0, 10000) : '',
+      run: !!(c && c.run),
+    }))
+    .filter((c) => c.command.trim())
+    .map((c) => ({ ...c, name: c.name || c.command.split('\n')[0].slice(0, 40) }))
+    .slice(0, 100);
 }
 
 function str(v) {

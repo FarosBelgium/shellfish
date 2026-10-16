@@ -152,6 +152,7 @@ async function loadHosts() {
     alertError('Could not read hosts.json', e);
   }
   renderHostList();
+  for (const t of tabs) t.refreshCommands?.(); // command bars follow edits
 }
 
 // Sets --env (and a background tint for terminals) on an element for a host's environment colour.
@@ -265,7 +266,7 @@ function renderUpdate(st) {
   box.className = `update-box state-${st.state}`;
   box.replaceChildren(
     el('div', { class: 'update-line' }, el('b', { text: `Shellfish ${st.version}` }), line ? el('span', { text: ` · ${line}`, title: line }) : null),
-    action);
+    ...(action ? [action] : [])); // replaceChildren(null) would insert the text "null"
 }
 
 api.updates.onStatus(renderUpdate);
@@ -318,6 +319,7 @@ function openHostEditor(h, { duplicate = false } = {}) {
   f.username.value = h?.username || '';
   f.privateKeyPath.value = h?.privateKeyPath || '';
   f.notes.value = h?.notes || '';
+  $('#cmd-list').replaceChildren(...(h?.commands || []).map((c) => commandRow(c)));
   const auth = h?.authType || 'password';
   form.querySelector(`input[name=authType][value=${auth}]`).checked = true;
   setAuthPane(auth);
@@ -339,6 +341,34 @@ function openHostEditor(h, { duplicate = false } = {}) {
   $('#host-modal').classList.remove('hidden');
   if (duplicate) { f.host.focus(); f.host.select(); } else (h ? f.name : f.host).focus();
 }
+
+// ---- saved commands (editor) ----
+
+function commandRow(c = { name: '', command: '', run: false }) {
+  const row = el('div', { class: 'cmd-row' },
+    el('input', { class: 'cmd-name', placeholder: 'Name, e.g. Disk usage', value: c.name, maxlength: '60', spellcheck: 'false' }),
+    el('textarea', { class: 'cmd-text', rows: String(Math.min(4, Math.max(1, c.command.split('\n').length))), placeholder: 'Command, e.g. df -h', spellcheck: 'false' }),
+    el('label', { class: 'cmd-run', title: 'Press Enter after pasting, so the command runs immediately' },
+      el('input', { type: 'checkbox', class: 'cmd-run-box', checked: c.run }), 'Run'),
+    el('button', { type: 'button', class: 'btn small icon', title: 'Move up', text: '↑', onclick: () => row.previousElementSibling && row.parentNode.insertBefore(row, row.previousElementSibling) }),
+    el('button', { type: 'button', class: 'btn small icon', title: 'Remove', text: '×', onclick: () => row.remove() }));
+  row.querySelector('.cmd-text').value = c.command;
+  return row;
+}
+
+function readCommandRows() {
+  return [...document.querySelectorAll('#cmd-list .cmd-row')].map((row) => ({
+    name: row.querySelector('.cmd-name').value,
+    command: row.querySelector('.cmd-text').value,
+    run: row.querySelector('.cmd-run-box').checked,
+  })).filter((c) => c.command.trim());
+}
+
+$('#btn-add-cmd').addEventListener('click', () => {
+  const row = commandRow();
+  $('#cmd-list').append(row);
+  row.querySelector('.cmd-name').focus();
+});
 
 function closeHostEditor() {
   $('#host-modal').classList.add('hidden');
@@ -379,6 +409,7 @@ form.addEventListener('submit', async (e) => {
     authType: form.querySelector('input[name=authType]:checked').value,
     privateKeyPath: f.privateKeyPath.value,
     notes: f.notes.value,
+    commands: readCommandRows(),
     label: f.label.value,
     color: f.color.value,
     jumpHostId: f.jumpHostId.value,
@@ -578,7 +609,8 @@ function openTerminal(host) {
   const banner = host.color
     ? el('div', { class: 'env-banner' }, el('b', { text: host.label || 'Environment' }), el('span', { text: `${host.name} · ${hostLabel(host)}` }))
     : null;
-  const view = el('div', { class: `term-wrap${host.color ? ' has-env' : ''}` }, banner, el('div', { class: 'term-area' }, termEl), overlay);
+  const cmdBar = host.local ? null : el('div', { class: 'cmd-bar' });
+  const view = el('div', { class: `term-wrap${host.color ? ' has-env' : ''}` }, banner, cmdBar, el('div', { class: 'term-area' }, termEl), overlay);
   const termBg = host.color ? tint('#0f1216', host.color, 0.07) : '#0f1216';
   if (host.color) { applyEnvColor(view, host); view.style.setProperty('--term-bg', termBg); }
   const tab = createTab({ title: host.name, kind: host.local ? 'local' : 'ssh', view, host });
@@ -607,6 +639,52 @@ function openTerminal(host) {
   new ResizeObserver(doFit).observe(termEl);
 
   term.onData((d) => { if (sessionId) api.ssh.write(sessionId, d); });
+
+  // ---- saved commands bar ----
+  const currentHost = () => hosts.find((x) => x.id === host.id) || host;
+
+  function pasteCommand(c) {
+    if (!sessionId) return;
+    term.paste(c.command); // like a normal paste: the user reviews it and presses Enter
+    if (c.run) api.ssh.write(sessionId, '\r');
+    term.focus();
+  }
+
+  async function saveCommandFromTerminal() {
+    const cmd = await promptDialog({ title: `Save a command for ${host.name}`, message: 'Command (multi-line commands can be added in the host editor):', value: term.getSelection().trim(), okText: 'Next' });
+    if (!cmd || !cmd.trim()) { term.focus(); return; }
+    const name = await promptDialog({ title: 'Name for this command', value: cmd.trim().slice(0, 40), okText: 'Save' });
+    if (name == null) { term.focus(); return; }
+    const h = currentHost();
+    try {
+      await call(api.hosts.save({ ...h, commands: [...(h.commands || []), { name, command: cmd, run: false }] }));
+      await loadHosts();
+    } catch (e) {
+      alertError('Could not save the command', e);
+    }
+    term.focus();
+  }
+
+  function renderCommandBar() {
+    if (!cmdBar) return;
+    const h = currentHost();
+    const cmds = h.commands || [];
+    cmdBar.replaceChildren(
+      ...cmds.map((c) => el('button', {
+        class: `cmd-chip${c.run ? ' run' : ''}`,
+        title: `${c.command}\n\n${c.run ? 'Click to paste and run' : 'Click to paste (then press Enter to run)'} · right-click to edit`,
+        onclick: () => pasteCommand(c),
+        oncontextmenu: (e) => { e.preventDefault(); openHostEditor(currentHost()); },
+      }, c.run ? el('span', { class: 'cmd-run-icon', text: '▶' }) : null, c.name)),
+      el('button', {
+        class: 'cmd-chip add',
+        title: 'Save a command for this host (uses the selected terminal text)',
+        text: cmds.length ? '+' : '+ Save a command',
+        onclick: saveCommandFromTerminal,
+      }));
+  }
+  tab.refreshCommands = renderCommandBar;
+  renderCommandBar();
   term.onResize(({ cols, rows }) => { if (sessionId) api.ssh.resize(sessionId, cols, rows); });
 
   // Ctrl+Shift+C / Ctrl+Shift+V copy & paste; right-click copies a selection or pastes.

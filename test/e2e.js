@@ -271,6 +271,7 @@ app.whenReady().then(async () => {
     const text = await until(() => js(`document.querySelector('#update-box')?.textContent || ''`), 5000, 'update box');
     assert(text.includes(`Shellfish ${app.getVersion()}`), `update box: "${text}"`);
     assert(/only in the installed app/.test(text), `expected the from-source note, got "${text}"`);
+    assert(!text.includes('null'), `update box shows "null": "${text}"`);
   });
   await test('UI asks for a missing jump host password and connects', async () => {
     // Answer the prompt from inside the page, as a user would.
@@ -288,6 +289,81 @@ app.whenReady().then(async () => {
     })()`);
     await until(() => termText().then((t) => t.includes('Welcome to target')), 10000, 'banner after prompt');
     await js('window.__obs.disconnect(); closeTab(activeTab)');
+  });
+
+  console.log('\nSaved commands');
+  await test('commands are stored cleanly in hosts.json', async () => {
+    const h = store.saveHost({ ...store.getHost(hDirect.id), password: null, commands: [
+      { name: '  Disk ', command: 'df -h\r\n', run: false },
+      { name: '', command: 'uptime', run: 1 },
+      { name: 'empty', command: '   ' },
+    ] });
+    assert(JSON.stringify(h.commands) === JSON.stringify([
+      { name: 'Disk', command: 'df -h', run: false },
+      { name: 'uptime', command: 'uptime', run: true },
+    ]), `got ${JSON.stringify(h.commands)}`);
+    assert(store.getHost(hDirect.id).password, 'saving commands must keep the saved password');
+    store.saveHost({ ...store.getHost(hDirect.id), password: null, commands: [] });
+    await js('loadHosts()');
+  });
+
+  await test('commands can be added in the host editor', async () => {
+    await js(`(async () => {
+      openHostEditor(hosts.find(x => x.name === 'target-direct'));
+      const add = (name, cmd, run) => {
+        document.querySelector('#btn-add-cmd').click();
+        const row = [...document.querySelectorAll('#cmd-list .cmd-row')].pop();
+        row.querySelector('.cmd-name').value = name;
+        row.querySelector('.cmd-text').value = cmd;
+        row.querySelector('.cmd-run-box').checked = run;
+      };
+      add('Paste only', 'ls -la /tmp', false);
+      add('Echo hi', 'echo hi', true);
+      document.querySelector('#host-form [type=submit]').click();
+    })()`);
+    await until(() => js(`(hosts.find(x => x.name === 'target-direct').commands || []).length === 2`), 5000, 'commands saved');
+    const saved = store.getHost(hDirect.id).commands;
+    assert(saved[0].name === 'Paste only' && saved[1].run === true, JSON.stringify(saved));
+  });
+
+  await test('clicking a command pastes it; "Run" commands also press Enter', async () => {
+    await js(`openTerminal(hosts.find(x => x.name === 'target-direct'))`);
+    await until(() => termText().then((t) => t.includes('Welcome to target')), 10000, 'banner');
+    const chips = await js(`[...document.querySelectorAll('.tabview.active .cmd-chip')].map(c => c.textContent)`);
+    assert(chips.join('|') === 'Paste only|▶Echo hi|+', `chips: ${chips.join('|')}`);
+    await js(`[...document.querySelectorAll('.tabview.active .cmd-chip')].find(c => c.textContent === 'Paste only').click()`);
+    await until(() => termText().then((t) => t.includes('ls -la /tmp')), 5000, 'pasted text');
+    await wait(500);
+    assert(!(await termText()).includes('target says: ls -la /tmp'), 'paste-only command was executed');
+    await js(`[...document.querySelectorAll('.tabview.active .cmd-chip')].find(c => c.textContent.endsWith('Echo hi')).click()`);
+    // The server sees one line: the pasted text followed by the run command.
+    await until(() => termText().then((t) => t.includes('target says: ls -la /tmpecho hi')), 5000, 'run command executed');
+  });
+
+  await test('"+" in the terminal saves a command for the host', async () => {
+    await js(`(() => {
+      const answers = ['whoami', 'Who am I'];
+      const obs = new MutationObserver(() => {
+        const m = document.querySelector('#dialog-modal');
+        if (!m.classList.contains('hidden') && answers.length) {
+          document.querySelector('#dialog-input').value = answers.shift();
+          document.querySelector('#dialog-ok').click();
+        }
+      });
+      obs.observe(document.querySelector('#dialog-modal'), { attributes: true });
+      window.__obs2 = obs;
+      [...document.querySelectorAll('.tabview.active .cmd-chip')].find(c => c.classList.contains('add')).click();
+    })()`);
+    await until(() => js(`[...document.querySelectorAll('.tabview.active .cmd-chip')].some(c => c.textContent === 'Who am I')`), 5000, 'new chip');
+    assert(store.getHost(hDirect.id).commands.some((c) => c.command === 'whoami' && c.name === 'Who am I'), 'not saved to hosts.json');
+    await js('window.__obs2.disconnect(); closeTab(activeTab)');
+  });
+
+  await test('local terminal has no command bar', async () => {
+    await js('openTerminal(LOCAL_HOST)');
+    await wait(300);
+    assert(!(await js(`!!document.querySelector('.tabview.active .cmd-bar')`)), 'local terminal shows a command bar');
+    await js('closeTab(activeTab)');
   });
 
   // ---- summary ----
