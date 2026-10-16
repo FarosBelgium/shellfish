@@ -12,7 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 
 const args = process.argv.slice(2);
 const tamper = args.includes('--tamper');
@@ -92,6 +92,10 @@ server.listen(0, '127.0.0.1', () => {
     const failed = (!tamper && errors.length > 0) || /update downloaded/.test(tamper ? log : '') || exited !== null;
     if (!done && !failed && Date.now() - t0 < 150000) return;
     clearInterval(timer);
+    if (!done && process.platform === 'darwin' && exited === null) {
+      // Show where the app's main thread is stuck.
+      try { console.log(execSync(`sample ${child.pid} 2 -mayDie`, { encoding: 'utf8' }).split('\n').slice(0, 80).join('\n')); } catch (e) { console.log(`sample failed: ${e.message}`); }
+    }
     child.kill();
     server.close();
     console.log(`--- ${logFile}\n${log || '(no log)'}---`);
