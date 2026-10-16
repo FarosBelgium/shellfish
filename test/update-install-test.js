@@ -8,7 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
 
 const [exe, distDir = 'dist'] = process.argv.slice(2);
 const PORT = 9333;
@@ -22,7 +22,14 @@ async function until(fn, ms, what) {
     await wait(250);
   }
 }
-const pidsOf = () => execSync(`pgrep -x -f ${exe} || true`, { encoding: 'utf8' }).split('\n').filter(Boolean).map(Number);
+// Main processes of the app: the command starts with the executable and it is not a Chromium
+// helper (--type=...). Chromium rewrites its command line into one space-separated string.
+const pidsOf = () => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number).filter((pid) => {
+  try {
+    const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
+    return (cmd === exe || cmd.startsWith(`${exe} `)) && !/\s--type=/.test(cmd);
+  } catch { return false; }
+});
 const nnp = (pid) => (/^NoNewPrivs:\s*1$/m.test(fs.readFileSync(`/proc/${pid}/status`, 'utf8')) ? 1 : 0);
 
 // Feed announcing 99.0.0 with the .deb that was just built.
