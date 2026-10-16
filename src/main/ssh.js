@@ -65,8 +65,18 @@ async function verifyHostKey(win, store, host, keyBuf) {
 
 // ---- connecting -------------------------------------------------------------
 
+// Opt-in per host, for old servers (e.g. Java SSH libraries on SFTP appliances) that only
+// offer algorithms ssh2 and OpenSSH no longer use by default. Appended, so modern
+// algorithms are still preferred whenever the server has them.
+const LEGACY_ALGORITHMS = {
+  kex: { append: ['diffie-hellman-group14-sha1', 'diffie-hellman-group-exchange-sha1', 'diffie-hellman-group1-sha1'] },
+  cipher: { append: ['aes256-cbc', 'aes192-cbc', 'aes128-cbc', '3des-cbc'] },
+  serverHostKey: { append: ['ssh-dss'] },
+};
+
 function classifyError(err) {
   const msg = String(err && err.message || err);
+  if (/no matching (key exchange|host key format|cipher|MAC)/i.test(msg)) return 'LEGACY_ALGOS';
   if (/passphrase/i.test(msg) && /(no passphrase|bad passphrase|decrypt|encrypted)/i.test(msg)) return 'NEED_PASSPHRASE';
   if (/All configured authentication methods failed/i.test(msg)) return 'AUTH_FAILED';
   if (/host key|hostkey|verification failed/i.test(msg)) return 'HOSTKEY_REJECTED';
@@ -97,7 +107,12 @@ async function connectHop(win, store, host, secret = {}, sock) {
     }
   }
   return new Promise((resolve, reject) => {
-    const fail = (e) => reject(annotate(e));
+    const fail = (e) => {
+      annotate(e);
+      // Already allowed and still no match: the server is simply incompatible.
+      if (e.code === 'LEGACY_ALGOS' && host.legacyAlgorithms) e.code = 'ERROR';
+      reject(e);
+    };
     const cfg = {
       host: host.host,
       port: host.port || 22,
@@ -110,6 +125,7 @@ async function connectHop(win, store, host, secret = {}, sock) {
         verifyHostKey(win, store, host, key).then(verify, () => verify(false));
       },
     };
+    if (host.legacyAlgorithms) cfg.algorithms = LEGACY_ALGORITHMS;
     try {
       if (ppkKey) {
         cfg.privateKey = ppkKey; // already decrypted

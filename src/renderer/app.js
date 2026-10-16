@@ -215,7 +215,7 @@ function hostItem(h, depth) {
   const item = el('div', {
     class: `host${h.color ? ' has-env' : ''}${depth ? ' nested' : ''}`,
     style: `--depth: ${depth - 1}`,
-    title: `${hostLabel(h)}\nClick to open a terminal${h.notes ? `\n\n${h.notes}` : ''}`,
+    title: `${hostLabel(h)}${h.legacyAlgorithms ? '\nOlder algorithms allowed (old server)' : ''}\nClick to open a terminal${h.notes ? `\n\n${h.notes}` : ''}`,
     onclick: () => openTerminal(h),
   },
   el('div', { class: 'host-main' },
@@ -505,6 +505,7 @@ function openHostEditor(h, { duplicate = false, group = '' } = {}) {
   f.username.value = h?.username || '';
   f.privateKeyPath.value = h?.privateKeyPath || '';
   f.notes.value = h?.notes || '';
+  f.legacyAlgorithms.checked = !!h?.legacyAlgorithms;
   $('#cmd-list').replaceChildren(...(h?.commands || []).map((c) => commandRow(c)));
   const auth = h?.authType || 'password';
   form.querySelector(`input[name=authType][value=${auth}]`).checked = true;
@@ -599,6 +600,7 @@ form.addEventListener('submit', async (e) => {
     label: f.label.value,
     color: f.color.value,
     jumpHostId: f.jumpHostId.value,
+    legacyAlgorithms: f.legacyAlgorithms.checked,
     copySecretsFrom: duplicateFrom || undefined,
     password: f.password.value || null,
     passphrase: f.passphrase.value || null,
@@ -666,6 +668,17 @@ async function connectWithPrompts(kind, host, extra = {}) {
       });
       if (pw == null) return { ok: false, cancelled: true };
       typed.password = pw;
+      continue;
+    }
+    if (res.code === 'LEGACY_ALGOS') {
+      const ok = await confirmDialog({
+        title: `${hop.name} uses old encryption`,
+        message: `${hop.name} (${hostLabel(hop)}) only supports older algorithms that Shellfish, like OpenSSH, does not use by default:\n\n${res.message}\n\nAllow older algorithms for this host? Shellfish still prefers modern ones whenever the server offers them. You can change this later in the host editor.`,
+        okText: 'Allow and connect',
+      });
+      if (!ok) return { ok: false, cancelled: true };
+      await call(api.hosts.save({ ...hop, legacyAlgorithms: true, password: null, passphrase: null }));
+      await loadHosts();
       continue;
     }
     if (res.code === 'NEED_PASSPHRASE') {

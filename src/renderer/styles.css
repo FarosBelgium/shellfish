@@ -288,6 +288,8 @@ th.c-size { text-align: right; }
 .modal-card .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .modal-card .span2 { grid-column: span 2; }
 .auth-switch { display: flex; gap: 18px; }
+.modal-card label.check-row { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 13px; cursor: pointer; }
+.check-row input { width: auto; }
 .cmd-field { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 #cmd-list { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 #cmd-list:empty { display: none; }

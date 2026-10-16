@@ -354,6 +354,67 @@ app.whenReady().then(async () => {
     assert(['Tree', 'Tree / Prod', 'Tree / Test'].every((g) => v.options.includes(g)), 'group suggestions should include parents and subgroups');
   });
 
+  console.log('\nOld servers (legacy algorithms)');
+  // Like securedata.groupjoos.com: only SHA-1 key exchange and an ssh-rsa host key.
+  const oldServer = await startServer({
+    name: 'oldserver', password: 'old-pass', hostKeyType: 'rsa',
+    algorithms: { kex: ['diffie-hellman-group14-sha1', 'diffie-hellman-group1-sha1'], serverHostKey: ['ssh-rsa'] },
+  });
+  const hOld = add({ name: 'old-server', port: oldServer.port, password: 'old-pass' });
+
+  await test('an old server fails with a clear code when older algorithms are not allowed', async () => {
+    const r = await ssh.openShell(win, store, makeSender(), { hostId: hOld.id });
+    assert(!r.ok && r.code === 'LEGACY_ALGOS' && r.hostId === hOld.id, `${r.code}: ${r.message}`);
+    assert(/key exchange/.test(r.message), r.message);
+  });
+
+  await test('with "Allow older algorithms" the old server connects (and prefers group14 over group1)', async () => {
+    store.saveHost({ ...store.getHost(hOld.id), password: null, legacyAlgorithms: true });
+    const sender = makeSender();
+    const r = await ssh.openShell(win, store, sender, { hostId: hOld.id });
+    assert(r.ok, r.message);
+    await until(() => (sender.out[r.id] || '').includes('Welcome to oldserver'), 8000, 'banner');
+    assert(oldServer.stats.kex === 'diffie-hellman-group14-sha1', `negotiated ${oldServer.stats.kex}`);
+    ssh.closeSession(r.id);
+    store.saveHost({ ...store.getHost(hOld.id), password: null, legacyAlgorithms: false });
+  });
+
+  await test('modern servers are unaffected by the setting', async () => {
+    store.saveHost({ ...store.getHost(hDirect.id), password: null, legacyAlgorithms: true });
+    const { r } = await shellRoundTrip(hDirect.id);
+    ssh.closeSession(r.id);
+    store.saveHost({ ...store.getHost(hDirect.id), password: null, legacyAlgorithms: false });
+  });
+
+  await test('UI: connecting asks to allow older algorithms, saves it for the host, and connects', async () => {
+    await js('loadHosts()');
+    await js(`(() => {
+      const obs = new MutationObserver(() => {
+        const m = document.querySelector('#dialog-modal');
+        if (!m.classList.contains('hidden') && /uses old encryption/.test(document.querySelector('#dialog-title').textContent)) {
+          window.__legacyPrompt = document.querySelector('#dialog-message').textContent;
+          document.querySelector('#dialog-ok').click();
+        }
+      });
+      obs.observe(document.querySelector('#dialog-modal'), { attributes: true });
+      window.__obs3 = obs;
+      openTerminal(hosts.find(x => x.name === 'old-server'));
+    })()`);
+    await until(() => termText().then((t) => t.includes('Welcome to oldserver')), 10000, 'banner after allowing');
+    assert(/key exchange/.test(await js('window.__legacyPrompt')), 'the question should show the reason');
+    assert(store.getHost(hOld.id).legacyAlgorithms === true, 'the choice was not saved');
+    assert(store.getHost(hOld.id).password, 'saving the choice must keep the password');
+    await js('window.__obs3.disconnect(); closeTab(activeTab)');
+  });
+
+  await test('the host editor keeps the setting when saving other changes', async () => {
+    await js(`(() => { openHostEditor(hosts.find(x => x.name === 'old-server')); const f = document.querySelector('#host-form'); window.__legacyBox = f.elements.legacyAlgorithms.checked; f.elements.notes.value = 'edited'; document.querySelector('#host-form [type=submit]').click(); })()`);
+    await until(() => store.getHost(hOld.id).notes === 'edited', 3000, 'saved');
+    assert(await js('window.__legacyBox') === true, 'checkbox should show the saved setting');
+    assert(store.getHost(hOld.id).legacyAlgorithms === true, 'saving in the editor turned the setting off');
+  });
+  oldServer.close();
+
   console.log('\nSaved commands');
   await test('commands are stored cleanly in hosts.json', async () => {
     const h = store.saveHost({ ...store.getHost(hDirect.id), password: null, commands: [

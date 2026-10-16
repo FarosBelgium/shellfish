@@ -142,6 +142,7 @@ class Store {
       port: Number(input.port) || 22,
       username: str(input.username),
       jumpHostId: str(input.jumpHostId),
+      legacyAlgorithms: !!input.legacyAlgorithms, // allow SHA-1 key exchange etc. for old servers
       authType: input.authType === 'key' ? 'key' : 'password',
       password: existing?.password || source?.password || '',
       privateKeyPath: str(input.privateKeyPath),

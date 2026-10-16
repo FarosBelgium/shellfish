@@ -19,15 +19,17 @@ function generateKey(type = 'ed25519', opts = {}) {
 }
 
 // `username` may be a list of accepted user names.
-function startServer({ name, username = 'tester', password, publicKey, allowForwarding = true, root }) {
-  const hostKey = generateKey().private;
+// `algorithms` (ssh2 format) restricts what the server offers, e.g. to imitate an old server.
+function startServer({ name, username = 'tester', password, publicKey, allowForwarding = true, root, algorithms, hostKeyType = 'ed25519' }) {
+  const hostKey = generateKey(hostKeyType, hostKeyType === 'rsa' ? { bits: 2048 } : {}).private;
   const allowedKeys = [].concat(publicKey || []).map((k) => utils.parseKey(k)); // one key or a list
   const stats = { connections: 0, open: 0, forwards: [], authFailures: 0 };
 
-  const server = new Server({ hostKeys: [hostKey] }, (client) => {
+  const server = new Server({ hostKeys: [hostKey], ...(algorithms ? { algorithms } : {}) }, (client) => {
     stats.connections++;
     stats.open++;
     client.on('close', () => { stats.open--; });
+    client.on('handshake', (negotiated) => { stats.kex = negotiated.kex; });
     client.on('error', () => {});
 
     client.on('authentication', (ctx) => {

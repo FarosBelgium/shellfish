@@ -96,6 +96,11 @@
         </label>
       </div>
 
+      <label class="check-row" title="SHA-1 key exchange (diffie-hellman-group14/group1/group-exchange-sha1), CBC ciphers and DSA host keys. Only for old servers that support nothing newer; modern algorithms are still preferred.">
+        <input type="checkbox" name="legacyAlgorithms">
+        <span>Allow older algorithms <span class="muted">(only for old servers that refuse to connect otherwise)</span></span>
+      </label>
+
       <label>Notes<textarea name="notes" rows="2" spellcheck="false"></textarea></label>
 
       <div class="cmd-field">
