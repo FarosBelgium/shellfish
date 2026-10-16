@@ -12,7 +12,8 @@
     "dist:mac": "electron-builder --mac --publish never",
     "dist:all": "electron-builder --linux deb --win nsis --publish never",
     "dist:mac-from-linux": "electron-builder --mac dir --arm64 --x64 --publish never && bash scripts/zip-mac.sh",
-    "test": "electron test/e2e.js"
+    "test": "electron test/e2e.js",
+    "postinstall": "node scripts/fix-node-pty.js"
   },
   "author": {
     "name": "Ruben Schroyen",

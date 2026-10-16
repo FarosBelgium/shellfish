@@ -61,6 +61,10 @@ if (process.platform === 'linux') {
   logFile = path.join(os.homedir(), 'Library', 'Application Support', 'shellfish', 'logs', 'updates.log');
 }
 try { fs.rmSync(logFile); } catch { /* no previous log */ }
+// Start without a previously downloaded update: the updater reuses a cached download
+// whose checksum still matches, which would hide what this run serves.
+const cacheBase = { linux: process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), win32: process.env.LOCALAPPDATA, darwin: path.join(os.homedir(), 'Library', 'Caches') }[process.platform];
+fs.rmSync(path.join(cacheBase, 'shellfish-updater'), { recursive: true, force: true });
 
 server.listen(0, '127.0.0.1', () => {
   env.SHELLFISH_UPDATE_FEED = `http://127.0.0.1:${server.address().port}/`;

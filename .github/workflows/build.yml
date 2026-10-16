@@ -37,9 +37,9 @@ jobs:
     env:
       ELECTRON_ENABLE_LOGGING: '0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -90,10 +90,13 @@ jobs:
           Start-Process $installer.FullName -ArgumentList '/S' -Wait
           $exe = "$env:LOCALAPPDATA\Programs\Shellfish\Shellfish.exe"
           if (-not (Test-Path $exe)) { Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter Shellfish.exe | Select-Object -First 5; throw "Shellfish.exe not found after install" }
+          # Shellfish.exe is a GUI program: PowerShell does not record its exit code with `&`,
+          # so run it with Start-Process -Wait and read the code from the process object.
           $env:ELECTRON_RUN_AS_NODE = '1'
-          & $exe test/packaged-pty-test.js "$env:LOCALAPPDATA\Programs\Shellfish\resources"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $p = Start-Process $exe -ArgumentList 'test/packaged-pty-test.js', "`"$env:LOCALAPPDATA\Programs\Shellfish\resources`"" -Wait -PassThru -NoNewWindow -RedirectStandardOutput pty-out.txt
+          Get-Content pty-out.txt
           Remove-Item Env:ELECTRON_RUN_AS_NODE
+          if ($p.ExitCode -ne 0) { throw "packaged node-pty test failed ($($p.ExitCode))" }
           node test/update-test.js $exe dist
           if ($LASTEXITCODE -ne 0) { exit 1 }
           node test/update-test.js $exe dist --tamper
@@ -135,7 +138,7 @@ jobs:
     permissions:
       contents: write # create the release; only this job gets write access
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check that the tag matches package.json
         run: |
