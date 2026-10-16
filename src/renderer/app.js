@@ -214,7 +214,8 @@ function renderHostList() {
     },
     el('div', { class: 'host-main' },
       el('div', { class: 'host-name', text: h.name }),
-      el('div', { class: 'host-sub', text: hostLabel(h) })),
+      el('div', { class: 'host-sub', text: hostLabel(h) }),
+      h.jumpHostId ? el('div', { class: 'host-via', text: `via ${jumpPath(h).join(' → ') || '(missing jump host)'}` }) : null),
     h.label ? el('span', { class: 'env-badge', text: h.label }) : null,
     el('span', { class: 'auth-badge', title: h.authType === 'key' ? 'Private key' : 'Password', text: h.authType === 'key' ? 'key' : 'pw' }),
     el('div', { class: 'host-actions' },
@@ -237,6 +238,38 @@ async function renderStoreInfo() {
     );
   } catch { /* non-fatal */ }
 }
+
+// ---- updates ----
+
+function renderUpdate(st) {
+  const box = $('#update-box');
+  const btn = (text, onclick, cls = 'btn small') => el('button', { class: cls, text, onclick });
+  const check = () => api.updates.check().then((r) => r.ok && renderUpdate(r.data));
+  let line, action = null;
+  switch (st.state) {
+    case 'dev': line = 'Running from source: updates only in the installed app'; break;
+    case 'checking': line = 'Checking for updates…'; break;
+    case 'up-to-date': line = 'Up to date'; action = btn('Check again', check); break;
+    case 'downloading': line = `Downloading ${st.newVersion || 'update'}… ${st.percent || 0}%`; break;
+    case 'ready':
+      line = `Version ${st.newVersion} is ready`;
+      action = btn(st.platform === 'linux' ? 'Install & restart (asks password)' : 'Restart to update', () => api.updates.install(), 'btn small primary');
+      break;
+    case 'available-manual':
+      line = `Version ${st.newVersion} is available`;
+      action = btn('Download', () => api.updates.install(), 'btn small primary');
+      break;
+    case 'error': line = `Update check failed: ${st.message}`; action = btn('Retry', check); break;
+    default: line = ''; action = btn('Check for updates', check);
+  }
+  box.className = `update-box state-${st.state}`;
+  box.replaceChildren(
+    el('div', { class: 'update-line' }, el('b', { text: `Shellfish ${st.version}` }), line ? el('span', { text: ` · ${line}`, title: line }) : null),
+    action);
+}
+
+api.updates.onStatus(renderUpdate);
+api.updates.status().then((r) => r.ok && renderUpdate(r.data));
 
 $('#host-search').addEventListener('input', renderHostList);
 $('#btn-new-host').addEventListener('click', () => openHostEditor(null));
@@ -289,6 +322,13 @@ function openHostEditor(h, { duplicate = false } = {}) {
   form.querySelector(`input[name=authType][value=${auth}]`).checked = true;
   setAuthPane(auth);
   setEnv(h?.label || '', h?.color || '');
+  // "Connect via": any other host. Loops are rejected when saving.
+  $('#jump-select').replaceChildren(
+    el('option', { value: '', text: 'Direct connection' }),
+    ...hosts.filter((x) => !editing || x.id !== h.id)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((x) => el('option', { value: x.id, text: `${x.name} (${hostLabel(x)})` })));
+  f.jumpHostId.value = h?.jumpHostId || '';
   const saved = duplicate ? '•••••• copied from original (type to replace)' : '•••••• saved (type to replace)';
   f.password.placeholder = h?.hasPassword ? saved : 'leave empty to be asked on connect';
   f.passphrase.placeholder = h?.hasPassphrase ? saved : 'only if the key is encrypted';
@@ -341,6 +381,7 @@ form.addEventListener('submit', async (e) => {
     notes: f.notes.value,
     label: f.label.value,
     color: f.color.value,
+    jumpHostId: f.jumpHostId.value,
     copySecretsFrom: duplicateFrom || undefined,
     password: f.password.value || null,
     passphrase: f.passphrase.value || null,
@@ -365,7 +406,9 @@ $('#btn-delete-host').addEventListener('click', async () => {
   const id = form.elements.id.value;
   const h = hosts.find((x) => x.id === id);
   if (!h) return;
-  if (!(await confirmDialog({ title: 'Delete host', message: `Remove "${h.name}" (${hostLabel(h)}) from saved hosts?`, okText: 'Delete', danger: true }))) return;
+  const dependents = hosts.filter((x) => x.jumpHostId === id).map((x) => x.name);
+  const warn = dependents.length ? `\n\nIt is the jump host for: ${dependents.join(', ')}. Those hosts will not connect until you choose another jump host.` : '';
+  if (!(await confirmDialog({ title: 'Delete host', message: `Remove "${h.name}" (${hostLabel(h)}) from saved hosts?${warn}`, okText: 'Delete', danger: true }))) return;
   try {
     await call(api.hosts.remove(id));
     closeHostEditor();
@@ -379,39 +422,57 @@ $('#btn-delete-host').addEventListener('click', async () => {
 // Connecting (with password / passphrase prompts)
 // ===========================================================================
 
+// Connects, asking for any password/passphrase that is missing or wrong. With jump
+// hosts the main process reports which hop failed (res.hostId), so the prompt names
+// the right server. Typed secrets are kept for this attempt only, never saved.
 async function connectWithPrompts(kind, host, extra = {}) {
-  const opts = { hostId: host.id, ...extra };
+  const secrets = {}; // hostId -> { password?, passphrase? }
+  const tries = {}; // hostId -> prompts shown
   const open = kind === 'ssh' ? api.ssh.open : api.sftp.open;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await open(opts);
+  for (;;) {
+    const res = await open({ hostId: host.id, ...extra, secrets });
     if (res.ok) return res;
 
-    if (res.code === 'AUTH_FAILED' && host.authType === 'password') {
-      const tried = attempt > 0 || host.hasPassword;
+    const hop = hosts.find((x) => x.id === res.hostId) || host;
+    const typed = secrets[hop.id] || (secrets[hop.id] = {});
+    tries[hop.id] = (tries[hop.id] || 0) + 1;
+    if (tries[hop.id] > 3) return { ...res, message: `${res.message} (gave up after 3 attempts)` };
+    const viaNote = hop.id !== host.id ? ` (jump host for ${host.name})` : '';
+
+    if (res.code === 'AUTH_FAILED' && hop.authType === 'password') {
+      const tried = typed.password != null || hop.hasPassword;
       const pw = await promptDialog({
-        title: `Password for ${hostLabel(host)}`,
+        title: `Password for ${hop.name} (${hostLabel(hop)})${viaNote}`,
         message: tried ? 'Authentication failed. Try again:' : 'Enter password (not saved):',
         type: 'password',
         okText: 'Connect',
       });
       if (pw == null) return { ok: false, cancelled: true };
-      opts.password = pw;
+      typed.password = pw;
       continue;
     }
     if (res.code === 'NEED_PASSPHRASE') {
       const pp = await promptDialog({
-        title: 'Key passphrase',
-        message: `${opts.passphrase ? 'Wrong passphrase. ' : ''}The key ${host.privateKeyPath} is encrypted. Enter its passphrase (not saved):`,
+        title: `Key passphrase${viaNote}`,
+        message: `${typed.passphrase != null ? 'Wrong passphrase. ' : ''}The key ${hop.privateKeyPath} is encrypted. Enter its passphrase (not saved):`,
         type: 'password',
         okText: 'Unlock',
       });
       if (pp == null) return { ok: false, cancelled: true };
-      opts.passphrase = pp;
+      typed.passphrase = pp;
       continue;
     }
     return res;
   }
-  return { ok: false, message: 'Too many failed attempts' };
+}
+
+// Names of the jump hosts in front of a host, outermost first.
+function jumpPath(h) {
+  const names = [];
+  for (let cur = hosts.find((x) => x.id === h.jumpHostId); cur && names.length < 10; cur = hosts.find((x) => x.id === cur.jumpHostId)) {
+    names.unshift(cur.name);
+  }
+  return names;
 }
 
 // ===========================================================================
@@ -489,8 +550,27 @@ document.addEventListener('keydown', (e) => {
 // ===========================================================================
 
 const shellHandlers = new Map(); // sessionId -> { data(d), closed(reason) }
-api.ssh.onData((id, data) => shellHandlers.get(id)?.data(data));
-api.ssh.onClosed((id, reason) => shellHandlers.get(id)?.closed(reason));
+// Output can arrive before the tab has registered its handler (a server may send its
+// banner the instant the shell opens), so hold it until registerShell() is called.
+const earlyShellEvents = new Map(); // sessionId -> [['data', d] | ['closed', reason]]
+function shellEvent(id, kind, value) {
+  const h = shellHandlers.get(id);
+  if (h) h[kind](value);
+  else {
+    if (!earlyShellEvents.has(id)) earlyShellEvents.set(id, []);
+    // Copy: the IPC byte buffer is not guaranteed to stay valid after this callback.
+    earlyShellEvents.get(id).push([kind, value instanceof Uint8Array ? value.slice() : value]);
+  }
+}
+api.ssh.onData((id, data) => shellEvent(id, 'data', data));
+api.ssh.onClosed((id, reason) => shellEvent(id, 'closed', reason));
+
+function registerShell(id, handler) {
+  shellHandlers.set(id, handler);
+  const early = earlyShellEvents.get(id) || [];
+  earlyShellEvents.delete(id);
+  for (const [kind, value] of early) handler[kind](value);
+}
 
 function openTerminal(host) {
   const overlay = el('div', { class: 'term-overlay hidden' });
@@ -514,6 +594,7 @@ function openTerminal(host) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(termEl);
+  tab.term = term;
 
   let sessionId = null;
   let closedByUser = false;
@@ -559,10 +640,11 @@ function openTerminal(host) {
     if (host.local) {
       res = await api.ssh.openLocal({ cols: term.cols, rows: term.rows });
     } else {
-      term.write(`\x1b[90mConnecting to ${hostLabel(host)}…\x1b[0m\r\n`);
+      const via = jumpPath(host);
+      term.write(`\x1b[90mConnecting to ${hostLabel(host)}${via.length ? ` via ${via.join(' → ')}` : ''}…\x1b[0m\r\n`);
       res = await connectWithPrompts('ssh', host, { cols: term.cols, rows: term.rows });
     }
-    if (!tabs.includes(tab)) { if (res.ok) api.close(res.id); return; }
+    if (!tabs.includes(tab)) { if (res.ok) { earlyShellEvents.delete(res.id); api.close(res.id); } return; }
     if (!res.ok) {
       tab.setState('error');
       if (!res.cancelled) term.write(`\x1b[31m${res.message}\x1b[0m\r\n`);
@@ -571,7 +653,7 @@ function openTerminal(host) {
     }
     sessionId = res.id;
     tab.setState('connected');
-    shellHandlers.set(sessionId, {
+    registerShell(sessionId, {
       data: (d) => term.write(d),
       closed: (reason) => {
         shellHandlers.delete(sessionId);

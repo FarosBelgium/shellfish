@@ -1,0 +1,159 @@
+# Tests, builds and installs Shellfish on Linux, Windows and macOS.
+# On a version tag (v1.2.3) whose tests pass on every OS, the installers are
+# published to the public repo FarosBelgium/shellfish-releases, where the
+# in-app updater looks for them.
+#
+# Needs the repository secret RELEASES_TOKEN: a fine-grained token with
+# "Contents: read and write" on FarosBelgium/shellfish-releases only.
+
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      ELECTRON_ENABLE_LOGGING: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Linux setup (virtual display; allow Electron's sandbox from node_modules)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          # Ubuntu 24.04 blocks unprivileged user namespaces; the installed .deb brings its
+          # own AppArmor profile, but Electron run from node_modules has none.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - run: npm ci
+
+      - name: End-to-end tests (jump hosts, SFTP, local terminal, UI)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a npm test; else npm test; fi
+
+      # ---- build ----
+      - name: Build .deb
+        if: runner.os == 'Linux'
+        run: npm run dist
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        run: npm run dist:win
+      - name: Build macOS dmg + zip (arm64 and x64)
+        if: runner.os == 'macOS'
+        run: npm run dist:mac
+
+      # ---- install the installer, then test the installed app ----
+      - name: Install .deb and test the installed app
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y ./dist/shellfish_*_amd64.deb
+          # Back to Ubuntu's default: the installed app must run with its own AppArmor profile.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1
+          ELECTRON_RUN_AS_NODE=1 /opt/Shellfish/shellfish test/packaged-pty-test.js /opt/Shellfish/resources
+          xvfb-run -a node test/update-test.js /opt/Shellfish/shellfish dist
+          xvfb-run -a node test/update-test.js /opt/Shellfish/shellfish dist --tamper
+
+      - name: Install on Windows and test the installed app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist\Shellfish-Setup-*.exe | Select-Object -First 1
+          Start-Process $installer.FullName -ArgumentList '/S' -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\Shellfish\Shellfish.exe"
+          if (-not (Test-Path $exe)) { Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter Shellfish.exe | Select-Object -First 5; throw "Shellfish.exe not found after install" }
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          & $exe test/packaged-pty-test.js "$env:LOCALAPPDATA\Programs\Shellfish\resources"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Remove-Item Env:ELECTRON_RUN_AS_NODE
+          node test/update-test.js $exe dist
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          node test/update-test.js $exe dist --tamper
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Install from the dmg and test the installed app
+        if: runner.os == 'macOS'
+        run: |
+          arch=$(uname -m); [ "$arch" = x86_64 ] && arch=x64
+          dmg=$(ls dist/Shellfish-*-mac-$arch.dmg | head -1)
+          hdiutil attach -nobrowse -mountpoint /Volumes/shellfish "$dmg"
+          mkdir -p "$RUNNER_TEMP/Applications"
+          cp -R /Volumes/shellfish/Shellfish.app "$RUNNER_TEMP/Applications/"
+          hdiutil detach /Volumes/shellfish
+          app="$RUNNER_TEMP/Applications/Shellfish.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/Shellfish" test/packaged-pty-test.js "$app/Contents/Resources"
+          node test/update-test.js "$app/Contents/MacOS/Shellfish" dist
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: shellfish-${{ runner.os }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            dist/*.deb
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest*.yml
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then echo "Tag $GITHUB_REF_NAME does not match package.json version $version"; exit 1; fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Publish to FarosBelgium/shellfish-releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          ls -la release
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo FarosBelgium/shellfish-releases \
+            --title "Shellfish ${GITHUB_REF_NAME#v}" \
+            --notes "Installers for Linux (.deb), Windows (.exe) and macOS (.dmg, Apple Silicon and Intel). Installed apps update themselves from this page."

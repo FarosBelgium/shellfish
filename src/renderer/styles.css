@@ -27,8 +27,8 @@ body {
   overflow: hidden;
   user-select: none;
 }
-input, textarea, button { font: inherit; color: inherit; }
-input, textarea {
+input, textarea, button, select { font: inherit; color: inherit; }
+input, textarea, select {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -37,7 +37,8 @@ input, textarea {
   user-select: text;
   outline: none;
 }
-input:focus, textarea:focus { border-color: var(--accent); }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+select { color: var(--text); }
 .hidden { display: none !important; }
 .muted { color: var(--muted); }
 .spacer { flex: 1; }
@@ -100,10 +101,17 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .tab.has-env { box-shadow: inset 0 -3px 0 var(--env); }
 .tab.has-env.active { box-shadow: inset 0 -3px 0 var(--env), inset 0 2px 0 var(--accent); }
 .pane.has-env { border-color: var(--env); box-shadow: inset 0 3px 0 var(--env); }
+.host-via { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.host-via::before { content: "↳ "; }
 .auth-badge { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .host-actions { display: none; gap: 4px; position: absolute; right: 6px; background: var(--bg-3); padding-left: 6px; }
 .host:hover .host-actions { display: flex; }
 .host:hover .auth-badge, .host:hover .env-badge { visibility: hidden; }
+.update-box { border-top: 1px solid var(--line); padding: 8px 12px; font-size: 11px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; color: var(--muted); }
+.update-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.update-line b { color: var(--text); font-weight: 600; }
+.update-box.state-ready, .update-box.state-available-manual { background: rgba(79, 163, 247, .08); }
+.update-box.state-error .update-line span { color: var(--warn); }
 .store-info { border-top: 1px solid var(--line); padding: 8px 12px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; }
 .store-info .ok { color: var(--ok); }
 .store-info .warn { color: var(--warn); }
@@ -222,7 +230,7 @@ th.c-size { text-align: right; }
 .modal-card.small { width: 420px; }
 .modal-card h2 { margin: 0; font-size: 16px; font-weight: 600; }
 .modal-card label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
-.modal-card label input, .modal-card label textarea { color: var(--text); font-size: 13px; }
+.modal-card label input, .modal-card label textarea, .modal-card label select { color: var(--text); font-size: 13px; }
 .modal-card .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .modal-card .span2 { grid-column: span 2; }
 .auth-switch { display: flex; gap: 18px; }

@@ -6,24 +6,24 @@ A desktop SSH/SFTP client for saved hosts. Click a host to open a terminal, or o
 
 | System | File | Data folder |
 |---|---|---|
-| Ubuntu / Debian | `dist/shellfish_1.2.1_amd64.deb` | `~/.config/shellfish/data/` |
-| Windows 10/11 | `dist/Shellfish-Setup-1.2.1.exe` | `%APPDATA%\shellfish\data\` |
-| macOS (Apple Silicon: M1 or newer) | `dist/Shellfish-1.2.1-mac-arm64.zip` | `~/Library/Application Support/shellfish/data/` |
-| macOS (Intel) | `dist/Shellfish-1.2.1-mac-x64.zip` | same |
+| Ubuntu / Debian | `dist/shellfish_1.3.0_amd64.deb` | `~/.config/shellfish/data/` |
+| Windows 10/11 | `dist/Shellfish-Setup-1.3.0.exe` | `%APPDATA%\shellfish\data\` |
+| macOS (Apple Silicon: M1 or newer) | `dist/Shellfish-1.3.0-mac-arm64.zip` | `~/Library/Application Support/shellfish/data/` |
+| macOS (Intel) | `dist/Shellfish-1.3.0-mac-x64.zip` | same |
 
 Installing a newer version replaces the old one; you never end up with two versions side by side. Uninstalling or updating keeps your saved hosts.
 
 ### Ubuntu / Debian
 
 ```bash
-sudo apt install ./dist/shellfish_1.2.1_amd64.deb
+sudo apt install ./dist/shellfish_1.3.0_amd64.deb
 ```
 
 Shellfish then appears in your applications menu. You can also start it with `shellfish` from a terminal. The installer sets up the AppArmor sandbox profile itself.
 
 ### Windows
 
-Run `Shellfish-Setup-1.2.1.exe`. No administrator rights are needed: it installs for the current user only. The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**.
+Run `Shellfish-Setup-1.3.0.exe`. No administrator rights are needed: it installs for the current user only. The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**.
 
 To open another drive in the SFTP left pane, type it in the path bar (e.g. `D:\`) and press Enter.
 
@@ -37,13 +37,39 @@ xattr -cr /Applications/Shellfish.app && codesign --force --deep --sign - /Appli
 
 After that it opens normally.
 
+### Updates
+
+The installed app checks for updates at startup and every 6 hours. At the bottom of the sidebar it shows the current version, with a button to check now.
+
+- **Windows**: the update downloads in the background. Click **Restart to update**, or it installs the next time you close Shellfish.
+- **Linux**: the update downloads in the background. Click **Install & restart**; it asks for your password, because a `.deb` installs system-wide.
+- **macOS**: the app tells you a new version exists. **Download** opens the release page. macOS only lets apps signed with an Apple Developer certificate replace themselves.
+
+Updates come from the public repository [FarosBelgium/shellfish-releases](https://github.com/FarosBelgium/shellfish-releases), which only contains the installers; the source code stays private. Every download is checked against the SHA-512 checksum published with the release, and rejected if it doesn't match.
+
+### Publishing a new version
+
+1. Raise `version` in `package.json` and commit.
+2. Tag and push: `git tag v1.3.1 && git push origin main v1.3.1`
+3. GitHub Actions tests and builds on Linux, Windows and macOS, installs each installer and tests the installed app. Only if everything passes does it publish the release to `shellfish-releases`; installed apps pick it up from there.
+
+One-time setup: create the public repository `FarosBelgium/shellfish-releases` (with a README, so it has a first commit). Then create a fine-grained token with **Contents: read and write** on that repository only, and add it to this repository as the Actions secret `RELEASES_TOKEN`.
+
+### Tests
+
+```bash
+npm test
+```
+
+This runs the end-to-end tests in Electron, against SSH servers the tests start themselves (two jump hosts and a target server): jump host chains, password prompts per hop, host key checks, SFTP through a tunnel, the local terminal and the UI. GitHub Actions runs them on Linux, Windows and macOS, on every push. It also tests the installed apps: the local terminal, and the updater against a local update feed, including rejecting a tampered download.
+
 ### Building the installers
 
 ```bash
 npm run dist                  # Linux .deb
 npm run dist:win              # Windows installer (on Linux this needs Wine)
 npm run dist:mac-from-linux   # macOS zips, unsigned (built on Linux)
-npm run dist:mac              # macOS .dmg, Intel + Apple Silicon in one (only works on a Mac)
+npm run dist:mac              # macOS .dmg + .zip for Apple Silicon and Intel (only works on a Mac)
 ```
 
 All icons are generated from `src/renderer/assets/shell.svg`, the same shell shown in the app. After changing it, run `npm run icons`.
@@ -68,6 +94,7 @@ Don't use `--no-sandbox`: it switches off a layer of protection. Re-run the setu
 ## Features
 
 - **Saved hosts** in the sidebar, with search and optional groups. Click a host to open an SSH terminal; hover it for **SSH**, **SFTP**, **⧉ duplicate** and **✎ edit**.
+- **Jump hosts / SSH tunnel**: under **Connect via** in the host editor, pick another saved host to tunnel through (like `ssh -J`). Chains work too: a jump host can have its own jump host (A → B → server). SSH and SFTP both go through the tunnel. Every hop gets its own host key check and password prompt. The sidebar shows the route (`↳ via bastion → internal`).
 - **Duplicate** a host (⧉ in the sidebar, or **Duplicate** in the editor) to create a similar one. Everything is copied, including the saved password, so you only change what's different (e.g. the IP address).
 - **Environment colours**: give a host a colour and label (presets: Development, Test, Acceptance, Production, or pick your own). The terminal gets a coloured frame, a banner with the label and a tinted background. The tab, the sidebar entry and the SFTP server pane are coloured too, so you can see at a glance whether you're on production.
 - **Authentication** with username + password, or username + private key (with an optional passphrase). If a password or passphrase isn't saved, or is wrong, you're asked for it when you connect, and that one isn't saved.
@@ -105,6 +132,7 @@ Example `hosts.json`:
       "port": 22,
       "username": "deploy",
       "authType": "key",
+      "jumpHostId": "",
       "password": "",
       "privateKeyPath": "~/.ssh/id_ed25519",
       "passphrase": "enc:djExE8xQTafSNaelqU6/XVUDJg==",
@@ -114,7 +142,7 @@ Example `hosts.json`:
 }
 ```
 
-You can edit this file by hand. To add a host, leave `id` out and one is generated. `authType` is `"password"` or `"key"`. `label` and `color` (`#rrggbb`) are optional.
+You can edit this file by hand. To add a host, leave `id` out and one is generated. `authType` is `"password"` or `"key"`. `label` and `color` (`#rrggbb`) are optional. `jumpHostId` is the `id` of the host to connect through (empty = direct).
 
 ## Security
 

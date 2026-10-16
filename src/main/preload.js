@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('api', {
     reveal: () => invoke('store:reveal'),
   },
   pickKey: () => invoke('dialog:pickKey'),
+  updates: {
+    status: () => invoke('update:status'),
+    check: () => invoke('update:check'),
+    install: () => invoke('update:install'),
+    onStatus: (fn) => on('update:status', fn),
+  },
   ssh: {
     open: (opts) => invoke('ssh:open', opts),
     openLocal: (opts) => invoke('local:shell', opts),

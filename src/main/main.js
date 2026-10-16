@@ -4,6 +4,7 @@ const os = require('os');
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const { Store } = require('./store');
 const ssh = require('./ssh');
+const updater = require('./updater');
 
 // The OS keyring key used to encrypt saved secrets is tied to the app name, so keep it
 // fixed: renaming the app would make every saved password undecryptable.
@@ -63,6 +64,9 @@ function registerIpc() {
   handle('hosts:delete', (_e, id) => store.deleteHost(id));
   handle('store:info', () => ({ dir: store.dir, file: store.hostsFile, encrypted: store.canEncrypt() }));
   handle('store:reveal', () => shell.showItemInFolder(store.hostsFile));
+  handle('update:status', () => updater.getStatus());
+  handle('update:check', () => updater.check());
+  handle('update:install', () => updater.install());
   handle('dialog:pickKey', async () => {
     const r = await dialog.showOpenDialog(win, {
       title: 'Choose private key',
@@ -113,6 +117,7 @@ app.whenReady().then(() => {
   }
   registerIpc();
   createWindow();
+  updater.init((status) => { if (win && !win.isDestroyed()) win.webContents.send('update:status', status); });
 });
 
 app.on('window-all-closed', () => app.quit());

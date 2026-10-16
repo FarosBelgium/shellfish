@@ -110,6 +110,20 @@ class Store {
     return h;
   }
 
+  // The hops to connect through, outermost first, ending with the host itself.
+  getChain(id) {
+    const hosts = this._readHostsDoc().hosts;
+    const chain = [];
+    for (let cur = id; cur;) {
+      const h = hosts.find((x) => x.id === cur);
+      if (!h) throw new Error(chain.length ? `Jump host of "${chain[0].name}" no longer exists` : 'Host not found');
+      if (chain.includes(h)) throw new Error('Jump hosts form a loop; check the "Connect via" settings');
+      chain.unshift(h);
+      cur = h.jumpHostId;
+    }
+    return chain;
+  }
+
   // input.password / input.passphrase: string = set, null/undefined = keep.
   // input.clearPassword / input.clearPassphrase: true = remove saved value.
   // input.copySecretsFrom: id of a host whose saved secrets a new (duplicated) host inherits.
@@ -127,6 +141,7 @@ class Store {
       host: str(input.host),
       port: Number(input.port) || 22,
       username: str(input.username),
+      jumpHostId: str(input.jumpHostId),
       authType: input.authType === 'key' ? 'key' : 'password',
       password: existing?.password || source?.password || '',
       privateKeyPath: str(input.privateKeyPath),
@@ -138,6 +153,17 @@ class Store {
     if (!host.username) throw new Error('Username is required');
     if (!Number.isInteger(host.port) || host.port < 1 || host.port > 65535) throw new Error('Port must be 1-65535');
     if (host.authType === 'key' && !host.privateKeyPath) throw new Error('Private key file is required for key authentication');
+    if (host.jumpHostId) {
+      // Walk the jump chain to reject missing hosts and loops (A via B via A).
+      const seen = new Set([host.id]);
+      for (let id = host.jumpHostId; id;) {
+        if (seen.has(id)) throw new Error('This jump host would create a loop (a host cannot connect via itself)');
+        seen.add(id);
+        const jump = doc.hosts.find((x) => x.id === id);
+        if (!jump) throw new Error('The selected jump host no longer exists');
+        id = jump.jumpHostId;
+      }
+    }
 
     if (input.clearPassword) host.password = '';
     else if (typeof input.password === 'string' && input.password) host.password = this.seal(input.password);

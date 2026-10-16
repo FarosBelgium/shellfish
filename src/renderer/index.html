@@ -19,6 +19,7 @@
       <button id="btn-new-host" class="btn primary" title="Add a host">+ New</button>
     </div>
     <div id="host-list"></div>
+    <div id="update-box" class="update-box"></div>
     <div id="store-info" class="store-info"></div>
   </aside>
 
@@ -44,6 +45,9 @@
         <label class="span2">Host / IP address<input name="host" required placeholder="192.168.1.10 or server.example.com" spellcheck="false"></label>
         <label>Port<input name="port" type="number" min="1" max="65535" value="22"></label>
         <label>Username<input name="username" required spellcheck="false"></label>
+        <label class="span2">Connect via (jump host / SSH tunnel)
+          <select name="jumpHostId" id="jump-select"></select>
+        </label>
       </div>
       <datalist id="group-options"></datalist>
 

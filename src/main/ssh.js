@@ -72,38 +72,42 @@ function classifyError(err) {
   return 'ERROR';
 }
 
-// opts.password / opts.passphrase override the saved secret for this attempt only.
-function connectClient(win, store, hostId, opts = {}) {
+// Connects to one host. `sock` is a tunnel through the previous hop (or undefined
+// for a direct connection). `secret` overrides the saved password/passphrase.
+function connectHop(win, store, host, secret = {}, sock) {
   return new Promise((resolve, reject) => {
-    let host;
-    const cfg = {};
+    const fail = (e) => {
+      e.code = e.code || classifyError(e);
+      e.hostId = host.id; // tells the UI which hop needs a password
+      e.hostName = host.name;
+      reject(e);
+    };
+    const cfg = {
+      host: host.host,
+      port: host.port || 22,
+      username: host.username,
+      sock,
+      readyTimeout: 60000, // includes time spent in the host key dialog
+      keepaliveInterval: 15000,
+      keepaliveCountMax: 4,
+      hostVerifier: (key, verify) => {
+        verifyHostKey(win, store, host, key).then(verify, () => verify(false));
+      },
+    };
     try {
-      host = store.getHost(hostId);
-      Object.assign(cfg, {
-        host: host.host,
-        port: host.port || 22,
-        username: host.username,
-        readyTimeout: 60000, // includes time spent in the host key dialog
-        keepaliveInterval: 15000,
-        keepaliveCountMax: 4,
-        hostVerifier: (key, verify) => {
-          verifyHostKey(win, store, host, key).then(verify, () => verify(false));
-        },
-      });
       if (host.authType === 'key') {
         const keyPath = expandHome(host.privateKeyPath);
         try { cfg.privateKey = fs.readFileSync(keyPath); } catch (e) { throw new Error(`Cannot read private key ${keyPath}: ${e.message}`); }
-        const pp = opts.passphrase ?? store.unseal(host.passphrase);
+        const pp = secret.passphrase ?? store.unseal(host.passphrase);
         if (pp) cfg.passphrase = pp;
       } else {
-        const pw = opts.password ?? store.unseal(host.password);
-        if (!pw) { const e = new Error('No password saved for this host'); e.code = 'AUTH_FAILED'; throw e; }
+        const pw = secret.password ?? store.unseal(host.password);
+        if (!pw) { const e = new Error(`No password saved for ${host.name}`); e.code = 'AUTH_FAILED'; throw e; }
         cfg.password = pw;
         cfg.tryKeyboard = true; // many servers only offer keyboard-interactive for passwords
       }
     } catch (e) {
-      e.code = e.code || classifyError(e);
-      return reject(e);
+      return fail(e);
     }
 
     const conn = new Client();
@@ -113,27 +117,63 @@ function connectClient(win, store, hostId, opts = {}) {
     }
     conn.once('ready', () => {
       settled = true;
-      resolve({ conn, host });
+      resolve(conn);
     });
     conn.on('error', (err) => {
-      if (!settled) {
-        settled = true;
-        err.code = classifyError(err);
-        reject(err);
-      }
+      if (!settled) { settled = true; fail(err); }
     });
     try {
       conn.connect(cfg);
     } catch (e) {
       settled = true;
-      e.code = classifyError(e);
-      reject(e);
+      fail(e);
     }
   });
 }
 
+// Opens a TCP channel from `jumpConn` to `host`, used as the socket for the next hop.
+function tunnelTo(jumpConn, jumpHost, host) {
+  return new Promise((resolve, reject) => {
+    jumpConn.forwardOut('127.0.0.1', 0, host.host, host.port || 22, (err, stream) => {
+      if (!err) return resolve(stream);
+      const e = new Error(`Jump host "${jumpHost.name}" could not reach ${host.host}:${host.port || 22} (${err.message})`);
+      e.code = 'ERROR';
+      e.hostId = host.id;
+      reject(e);
+    });
+  });
+}
+
+// Connects to a saved host, going through its jump hosts ("Connect via") if it has any.
+// opts.secrets: { [hostId]: { password?, passphrase? } } typed by the user for this attempt only.
+// Resolves to { conn, host }; ending `conn` also closes the jump connections behind it.
+async function connectClient(win, store, hostId, opts = {}) {
+  const secrets = opts.secrets || {};
+  let chain;
+  try {
+    chain = store.getChain(hostId);
+  } catch (e) {
+    e.code = 'ERROR';
+    throw e;
+  }
+  const conns = [];
+  const endAll = () => { for (const c of conns) { try { c.end(); } catch { /* already closed */ } } };
+  try {
+    for (let i = 0; i < chain.length; i++) {
+      const sock = i ? await tunnelTo(conns[i - 1], chain[i - 1], chain[i]) : undefined;
+      const conn = await connectHop(win, store, chain[i], secrets[chain[i].id], sock);
+      conns.push(conn);
+      conn.on('close', endAll); // any hop dropping takes the whole chain down
+    }
+  } catch (e) {
+    endAll();
+    throw e;
+  }
+  return { conn: conns[conns.length - 1], host: chain[chain.length - 1] };
+}
+
 function toIpcError(e) {
-  return { ok: false, code: e.code || 'ERROR', message: String(e.message || e) };
+  return { ok: false, code: e.code || 'ERROR', message: String(e.message || e), hostId: e.hostId, hostName: e.hostName };
 }
 
 function newId() {
@@ -146,10 +186,10 @@ function send(sender, channel, ...args) {
 
 // ---- terminal ---------------------------------------------------------------
 
-async function openShell(win, store, sender, { hostId, cols, rows, password, passphrase }) {
+async function openShell(win, store, sender, { hostId, cols, rows, secrets }) {
   let conn;
   try {
-    ({ conn } = await connectClient(win, store, hostId, { password, passphrase }));
+    ({ conn } = await connectClient(win, store, hostId, { secrets }));
   } catch (e) {
     return toIpcError(e);
   }
@@ -240,10 +280,10 @@ function p(fn) {
   return new Promise((resolve, reject) => fn((err, res) => (err ? reject(err) : resolve(res))));
 }
 
-async function openSftp(win, store, sender, { hostId, password, passphrase }) {
+async function openSftp(win, store, sender, { hostId, secrets }) {
   let conn;
   try {
-    ({ conn } = await connectClient(win, store, hostId, { password, passphrase }));
+    ({ conn } = await connectClient(win, store, hostId, { secrets }));
     const sftp = await p((cb) => conn.sftp(cb));
     const home = await p((cb) => sftp.realpath('.', cb)).catch(() => '/');
     const id = newId();
