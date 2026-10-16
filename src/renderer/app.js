@@ -167,6 +167,9 @@ function tint(base, color, amount) {
   return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * amount).toString(16).padStart(2, '0')).join('');
 }
 
+// Pseudo-host for terminals on this computer.
+const LOCAL_HOST = { id: '__local__', name: 'Local', local: true };
+
 function hostLabel(h) {
   return `${h.username}@${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}`;
 }
@@ -174,7 +177,15 @@ function hostLabel(h) {
 function renderHostList() {
   const list = $('#host-list');
   const q = $('#host-search').value.trim().toLowerCase();
-  list.replaceChildren();
+  list.replaceChildren(el('div', {
+    class: 'host local-host',
+    title: 'Open a terminal on this computer (Ctrl+Shift+T)',
+    onclick: () => openTerminal(LOCAL_HOST),
+  },
+  el('span', { class: 'local-icon', text: '>_' }),
+  el('div', { class: 'host-main' },
+    el('div', { class: 'host-name', text: 'Local terminal' }),
+    el('div', { class: 'host-sub', text: 'this computer' }))));
 
   const matches = hosts
     .filter((h) => !q || [h.name, h.host, h.username, h.group, h.label, h.notes].some((v) => v && v.toLowerCase().includes(q)))
@@ -419,7 +430,7 @@ function createTab({ title, kind, view, host }) {
     onclick: () => activateTab(tab),
     onauxclick: (e) => { if (e.button === 1) closeTab(tab); },
   },
-  el('span', { class: 'tab-kind', text: kind === 'ssh' ? 'SSH' : 'SFTP' }),
+  el('span', { class: 'tab-kind', text: { ssh: 'SSH', sftp: 'SFTP', local: 'LOCAL' }[kind] }),
   host?.label ? el('span', { class: 'env-badge', text: host.label }) : null,
   el('span', { class: 'tab-title', text: n ? `${title} (${n + 1})` : title }),
   el('span', { class: 'tab-dot' }),
@@ -457,12 +468,18 @@ function closeTab(tab) {
 
 // Ctrl+Tab / Ctrl+Shift+Tab to cycle, Ctrl+Shift+W to close.
 document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.key === 'Tab' && tabs.length) {
+  if (e.ctrlKey && e.shiftKey && e.code === 'KeyT') {
     e.preventDefault();
+    e.stopPropagation(); // keep the key from reaching a focused terminal
+    openTerminal(LOCAL_HOST);
+  } else if (e.ctrlKey && e.key === 'Tab' && tabs.length) {
+    e.preventDefault();
+    e.stopPropagation();
     const i = tabs.indexOf(activeTab);
     activateTab(tabs[(i + (e.shiftKey ? -1 : 1) + tabs.length) % tabs.length]);
   } else if (e.ctrlKey && e.shiftKey && (e.key === 'W' || e.key === 'w') && activeTab) {
     e.preventDefault();
+    e.stopPropagation();
     closeTab(activeTab);
   }
 }, true);
@@ -484,7 +501,7 @@ function openTerminal(host) {
   const view = el('div', { class: `term-wrap${host.color ? ' has-env' : ''}` }, banner, el('div', { class: 'term-area' }, termEl), overlay);
   const termBg = host.color ? tint('#0f1216', host.color, 0.07) : '#0f1216';
   if (host.color) { applyEnvColor(view, host); view.style.setProperty('--term-bg', termBg); }
-  const tab = createTab({ title: host.name, kind: 'ssh', view, host });
+  const tab = createTab({ title: host.name, kind: host.local ? 'local' : 'ssh', view, host });
 
   const term = new Terminal({
     cursorBlink: true,
@@ -529,7 +546,7 @@ function openTerminal(host) {
       el('div', { class: 'overlay-card' },
         el('div', { text: message }),
         el('div', { class: 'row' },
-          el('button', { class: 'btn primary', text: 'Reconnect', onclick: connect }),
+          el('button', { class: 'btn primary', text: host.local ? 'Restart' : 'Reconnect', onclick: connect }),
           el('button', { class: 'btn', text: 'Close tab', onclick: () => closeTab(tab) }))));
     overlay.classList.remove('hidden');
   }
@@ -538,13 +555,18 @@ function openTerminal(host) {
     overlay.classList.add('hidden');
     tab.setState('connecting');
     doFit();
-    term.write(`\x1b[90mConnecting to ${hostLabel(host)}…\x1b[0m\r\n`);
-    const res = await connectWithPrompts('ssh', host, { cols: term.cols, rows: term.rows });
+    let res;
+    if (host.local) {
+      res = await api.ssh.openLocal({ cols: term.cols, rows: term.rows });
+    } else {
+      term.write(`\x1b[90mConnecting to ${hostLabel(host)}…\x1b[0m\r\n`);
+      res = await connectWithPrompts('ssh', host, { cols: term.cols, rows: term.rows });
+    }
     if (!tabs.includes(tab)) { if (res.ok) api.close(res.id); return; }
     if (!res.ok) {
       tab.setState('error');
       if (!res.cancelled) term.write(`\x1b[31m${res.message}\x1b[0m\r\n`);
-      showOverlay(res.cancelled ? 'Connection cancelled.' : `Connection failed: ${res.message}`);
+      showOverlay(res.cancelled ? 'Connection cancelled.' : host.local ? res.message : `Connection failed: ${res.message}`);
       return;
     }
     sessionId = res.id;
@@ -556,6 +578,7 @@ function openTerminal(host) {
         sessionId = null;
         if (closedByUser) return;
         tab.setState('error');
+        if (host.local) { closeTab(tab); return; } // `exit` in a local shell closes its tab, like other terminals
         term.write(`\r\n\x1b[90m[Connection closed${reason ? `: ${reason}` : ''}]\x1b[0m\r\n`);
         showOverlay('Disconnected.');
       },

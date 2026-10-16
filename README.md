@@ -6,24 +6,24 @@ A desktop SSH/SFTP client for saved hosts. Click a host to open a terminal, or o
 
 | System | File | Data folder |
 |---|---|---|
-| Ubuntu / Debian | `dist/shellfish_1.1.0_amd64.deb` | `~/.config/shellfish/data/` |
-| Windows 10/11 | `dist/Shellfish-Setup-1.1.0.exe` | `%APPDATA%\shellfish\data\` |
-| macOS (Apple Silicon: M1 or newer) | `dist/Shellfish-1.1.0-mac-arm64.zip` | `~/Library/Application Support/shellfish/data/` |
-| macOS (Intel) | `dist/Shellfish-1.1.0-mac-x64.zip` | same |
+| Ubuntu / Debian | `dist/shellfish_1.2.1_amd64.deb` | `~/.config/shellfish/data/` |
+| Windows 10/11 | `dist/Shellfish-Setup-1.2.1.exe` | `%APPDATA%\shellfish\data\` |
+| macOS (Apple Silicon: M1 or newer) | `dist/Shellfish-1.2.1-mac-arm64.zip` | `~/Library/Application Support/shellfish/data/` |
+| macOS (Intel) | `dist/Shellfish-1.2.1-mac-x64.zip` | same |
 
-Uninstalling keeps your saved hosts.
+Installing a newer version replaces the old one; you never end up with two versions side by side. Uninstalling or updating keeps your saved hosts.
 
 ### Ubuntu / Debian
 
 ```bash
-sudo apt install ./dist/shellfish_1.1.0_amd64.deb
+sudo apt install ./dist/shellfish_1.2.1_amd64.deb
 ```
 
 Shellfish then appears in your applications menu. You can also start it with `shellfish` from a terminal. The installer sets up the AppArmor sandbox profile itself.
 
 ### Windows
 
-Run `Shellfish-Setup-1.1.0.exe`. No administrator rights are needed: it installs for the current user only. The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**.
+Run `Shellfish-Setup-1.2.1.exe`. No administrator rights are needed: it installs for the current user only. The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**.
 
 To open another drive in the SFTP left pane, type it in the path bar (e.g. `D:\`) and press Enter.
 
@@ -71,13 +71,14 @@ Don't use `--no-sandbox`: it switches off a layer of protection. Re-run the setu
 - **Duplicate** a host (⧉ in the sidebar, or **Duplicate** in the editor) to create a similar one. Everything is copied, including the saved password, so you only change what's different (e.g. the IP address).
 - **Environment colours**: give a host a colour and label (presets: Development, Test, Acceptance, Production, or pick your own). The terminal gets a coloured frame, a banner with the label and a tinted background. The tab, the sidebar entry and the SFTP server pane are coloured too, so you can see at a glance whether you're on production.
 - **Authentication** with username + password, or username + private key (with an optional passphrase). If a password or passphrase isn't saved, or is wrong, you're asked for it when you connect, and that one isn't saved.
+- **Local terminal**: **Local terminal** at the top of the sidebar, or `Ctrl+Shift+T`, opens a terminal on your own computer in a tab next to your SSH sessions. It uses your default shell (`$SHELL`; a login shell on macOS; PowerShell on Windows) and starts in your home folder. Typing `exit` closes the tab.
 - **Terminal**: full xterm (colors, vim, htop, …), several tabs at once, reconnect button. Copy/paste with `Ctrl+Shift+C` / `Ctrl+Shift+V`. Right-click copies the selection, or pastes if nothing is selected.
 - **SFTP**: local on the left, remote on the right.
   - Browse any folder: double-click, `Backspace` for the parent folder, or type a path and press Enter. Back, home and refresh buttons. Click a column to sort.
   - Upload/download with the middle buttons, by double-clicking a file, or by dragging between the panes. You can also drag files in from your file manager. Folders are copied recursively.
   - New folder, rename (`F2`), delete (`Del`). Local deletes go to the trash. Remote deletes are permanent and ask for confirmation first.
   - Asks before overwriting. The transfer panel shows progress.
-- Tabs: `Ctrl+Tab` to cycle, `Ctrl+Shift+W` or middle-click to close.
+- Tabs: `Ctrl+Shift+T` for a new local terminal, `Ctrl+Tab` to cycle, `Ctrl+Shift+W` or middle-click to close.
 
 ## Where your data is stored
 

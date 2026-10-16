@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   pickKey: () => invoke('dialog:pickKey'),
   ssh: {
     open: (opts) => invoke('ssh:open', opts),
+    openLocal: (opts) => invoke('local:shell', opts),
     write: (id, data) => ipcRenderer.send('ssh:write', id, data),
     resize: (id, cols, rows) => ipcRenderer.send('ssh:resize', id, cols, rows),
     onData: (fn) => on('ssh:data', fn),

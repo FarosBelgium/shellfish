@@ -82,6 +82,14 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .host:hover { background: var(--bg-3); }
 .host-main { flex: 1; min-width: 0; }
+.local-host { margin-bottom: 6px; }
+.local-icon {
+  flex: none; width: 30px; height: 30px; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); border: 1px solid var(--line);
+  font: 700 12px var(--mono); color: var(--ok);
+}
+.tab.kind-local .tab-kind { color: var(--warn); }
 .host-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .host-sub { color: var(--muted); font-size: 12px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .env-badge {

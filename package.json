@@ -1,13 +1,13 @@
 {
   "name": "shellfish",
-  "version": "1.1.0",
+  "version": "1.2.1",
   "description": "Saved-host SSH terminal and dual-pane SFTP client",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
     "setup:linux": "bash scripts/setup-linux-sandbox.sh",
     "dist": "electron-builder --linux deb",
-    "icons": "electron scripts/render-icon.js src/renderer/assets/shell.svg build/icon.png 1024 && electron scripts/render-icon.js src/renderer/assets/shell.svg src/renderer/assets/icon.png 256",
+    "icons": "electron scripts/render-icon.js src/renderer/assets/shell.svg build/icon.png:1024 src/renderer/assets/icon.png:256 build/icons/16x16.png:16 build/icons/24x24.png:24 build/icons/32x32.png:32 build/icons/48x48.png:48 build/icons/64x64.png:64 build/icons/128x128.png:128 build/icons/256x256.png:256 build/icons/512x512.png:512",
     "dist:win": "electron-builder --win nsis",
     "dist:mac": "electron-builder --mac dmg --universal",
     "dist:all": "electron-builder --linux deb --win nsis",
@@ -21,6 +21,7 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
@@ -42,17 +43,23 @@
       "!**/node_modules/cpu-features/**",
       "!**/node_modules/ssh2/lib/protocol/crypto/build/**",
       "!**/node_modules/buildcheck/**",
-      "!**/node_modules/nan/**"
+      "!**/node_modules/nan/**",
+      "!**/node_modules/node-pty/{src,deps,third_party,scripts,typings}/**",
+      "!**/node_modules/node-pty/**/*.pdb",
+      "!**/node_modules/node-addon-api/**"
     ],
     "linux": {
       "target": [
         "deb"
       ],
       "category": "Network;RemoteAccess",
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "executableName": "shellfish",
       "synopsis": "SSH terminal and SFTP client for saved hosts",
-      "syncDesktopName": true
+      "syncDesktopName": true,
+      "files": [
+        "!**/node_modules/node-pty/prebuilds/**"
+      ]
     },
     "deb": {
       "depends": [
@@ -73,7 +80,11 @@
           ]
         }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "files": [
+        "!**/node_modules/node-pty/build/**",
+        "!**/node_modules/node-pty/prebuilds/darwin-*/**"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -94,8 +105,16 @@
       ],
       "icon": "build/icon.png",
       "category": "public.app-category.developer-tools",
-      "artifactName": "Shellfish-${version}-mac.${ext}"
-    }
+      "artifactName": "Shellfish-${version}-mac.${ext}",
+      "files": [
+        "!**/node_modules/node-pty/build/**",
+        "!**/node_modules/node-pty/prebuilds/win32-*/**"
+      ]
+    },
+    "afterPack": "scripts/after-pack.js",
+    "asarUnpack": [
+      "**/node_modules/node-pty/**"
+    ]
   },
   "homepage": "https://faros.be",
   "desktopName": "shellfish.desktop"

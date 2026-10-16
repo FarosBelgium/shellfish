@@ -174,21 +174,60 @@ async function openShell(win, store, sender, { hostId, cols, rows, password, pas
   });
 }
 
+// ---- local terminal -----------------------------------------------------------
+
+function defaultShell() {
+  if (process.platform === 'win32') return { file: 'powershell.exe', args: ['-NoLogo'] };
+  const file = process.env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash');
+  // macOS terminals start login shells so ~/.zprofile etc. are read.
+  return { file, args: process.platform === 'darwin' ? ['-l'] : [] };
+}
+
+function openLocalShell(sender, { cols, rows }) {
+  let pty;
+  try {
+    pty = require('node-pty'); // loaded lazily: SSH/SFTP keep working if it is unavailable
+  } catch (e) {
+    return toIpcError(new Error(`Local terminal is not available: ${e.message}`));
+  }
+  const { file, args } = defaultShell();
+  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+  for (const k of Object.keys(env)) if (k.startsWith('ELECTRON_') || k === 'CHROME_DESKTOP') delete env[k];
+  let proc;
+  try {
+    proc = pty.spawn(file, args, { name: 'xterm-256color', cols: cols || 80, rows: rows || 24, cwd: os.homedir(), env });
+  } catch (e) {
+    return toIpcError(new Error(`Could not start ${file}: ${e.message}`));
+  }
+  const id = newId();
+  sessions.set(id, { type: 'local', pty: proc, sender });
+  proc.onData((d) => send(sender, 'ssh:data', id, d));
+  proc.onExit(({ exitCode }) => {
+    if (sessions.delete(id)) send(sender, 'ssh:closed', id, exitCode ? `exit code ${exitCode}` : null);
+  });
+  return { ok: true, id, shell: path.basename(file) };
+}
+
 function shellWrite(id, data) {
   const s = sessions.get(id);
   if (s && s.stream) s.stream.write(data);
+  else if (s && s.pty) s.pty.write(data);
 }
 
 function shellResize(id, cols, rows) {
   const s = sessions.get(id);
   if (s && s.stream) s.stream.setWindow(rows, cols, 0, 0);
+  else if (s && s.pty) { try { s.pty.resize(cols, rows); } catch { /* exited */ } }
 }
 
 function closeSession(id) {
   const s = sessions.get(id);
   if (!s) return;
   sessions.delete(id);
-  try { s.conn.end(); } catch { /* already gone */ }
+  try {
+    if (s.pty) s.pty.kill();
+    else s.conn.end();
+  } catch { /* already gone */ }
 }
 
 function closeAllForSender(sender) {
@@ -368,7 +407,7 @@ async function localList(dir) {
 }
 
 module.exports = {
-  openShell, shellWrite, shellResize, closeSession, closeAllForSender,
+  openShell, openLocalShell, shellWrite, shellResize, closeSession, closeAllForSender,
   openSftp, remoteList, remoteMkdir, remoteRename, remoteDelete, runTransfer,
   localList, toIpcError,
 };

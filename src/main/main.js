@@ -74,6 +74,7 @@ function registerIpc() {
 
   // terminal
   handle('ssh:open', (e, opts) => ssh.openShell(win, store, e.sender, opts));
+  handle('local:shell', (e, opts) => ssh.openLocalShell(e.sender, opts));
   ipcMain.on('ssh:write', (_e, id, data) => ssh.shellWrite(id, data));
   ipcMain.on('ssh:resize', (_e, id, cols, rows) => ssh.shellResize(id, cols, rows));
   ipcMain.on('session:close', (_e, id) => ssh.closeSession(id));
