@@ -233,9 +233,126 @@ function parseCsv(file) {
   return { format: 'CSV', candidates, warnings };
 }
 
+// ---- PuTTY (Windows registry export .reg, or ~/.putty/sessions on Linux/macOS) ---------
+
+const PUTTY_KEY = 'HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions';
+
+function readText(file) {
+  const buf = fs.readFileSync(file);
+  // `reg export` writes UTF-16LE with a byte order mark.
+  if (buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString('utf16le');
+  return buf.toString('utf8').replace(/^\uFEFF/, '');
+}
+
+// Parses a .reg export into { sessionName: { Key: value } }.
+function parsePuttyReg(text) {
+  const sessions = {};
+  let cur = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    const sec = /^\[(.+)\]$/.exec(line);
+    if (sec) {
+      const m = /\\Software\\SimonTatham\\PuTTY\\Sessions\\(.+)$/i.exec(sec[1]);
+      cur = m ? (sessions[decodeURIComponent(m[1])] = {}) : null;
+      continue;
+    }
+    if (!cur) continue;
+    const kv = /^"((?:[^"\\]|\\.)*)"=(.*)$/.exec(line);
+    if (!kv) continue;
+    const name = kv[1];
+    const v = kv[2];
+    if (v.startsWith('dword:')) cur[name] = String(parseInt(v.slice(6), 16));
+    else if (v.startsWith('"')) cur[name] = v.slice(1, v.lastIndexOf('"')).replace(/\\(.)/g, '$1');
+  }
+  return sessions;
+}
+
+// ~/.putty/sessions/<url-encoded name>, lines of Key=Value.
+function parsePuttyDir(dir) {
+  const sessions = {};
+  for (const f of fs.readdirSync(dir)) {
+    const full = path.join(dir, f);
+    if (!fs.statSync(full).isFile()) continue;
+    const s = {};
+    for (const line of fs.readFileSync(full, 'utf8').split(/\r?\n/)) {
+      const i = line.indexOf('=');
+      if (i > 0) s[line.slice(0, i)] = line.slice(i + 1);
+    }
+    sessions[decodeURIComponent(f)] = s;
+  }
+  return sessions;
+}
+
+const PUTTY_PROXY = { 1: 'SOCKS 4', 2: 'SOCKS 5', 3: 'HTTP', 4: 'Telnet', 5: 'local command' };
+
+function puttySessionsToCandidates(sessions, source) {
+  const candidates = [];
+  const warnings = [];
+  for (const [name, s] of Object.entries(sessions)) {
+    if (name === 'Default Settings') continue;
+    const protocol = (s.Protocol || 'ssh').toLowerCase();
+    if (protocol !== 'ssh') { warnings.push(`${name}: ${protocol} is not supported, skipped`); continue; }
+    let host = s.HostName || '';
+    let username = s.UserName || '';
+    const at = host.lastIndexOf('@'); // PuTTY accepts "user@host" in the host field
+    if (at > 0) { if (!username) username = host.slice(0, at); host = host.slice(at + 1); }
+    if (!host) { warnings.push(`${name}: no host name, skipped`); continue; }
+    const c = {
+      key: `putty:${name}`, alias: name, name, host,
+      port: Number(s.PortNumber) || 22,
+      username, group: '', notes: '', jumpChain: [], warnings: [],
+    };
+    if (s.PublicKeyFile) {
+      c.authType = 'key';
+      c.privateKeyPath = s.PublicKeyFile;
+    } else {
+      c.authType = 'password';
+    }
+    const method = Number(s.ProxyMethod || 0);
+    if (method === 6 && s.ProxyHost) {
+      // "SSH to proxy and use port forwarding" (PuTTY 0.77+): a jump host, given as a
+      // saved session name or as a host.
+      const isSession = Object.prototype.hasOwnProperty.call(sessions, s.ProxyHost);
+      const port = Number(s.ProxyPort) || 22;
+      c.jumpChain = [isSession ? s.ProxyHost : `${s.ProxyUsername ? `${s.ProxyUsername}@` : ''}${s.ProxyHost}${port !== 22 ? `:${port}` : ''}`];
+    } else if (method) {
+      c.warnings.push(`${PUTTY_PROXY[method] || 'proxy'} proxy is not supported; imported as a direct connection`);
+    }
+    if (s.PortForwardings) c.warnings.push('port forwards are not imported');
+    candidates.push(c);
+  }
+  if (!candidates.length && !warnings.length) warnings.push(`No PuTTY sessions found in ${source}`);
+  return { format: 'PuTTY', candidates, warnings };
+}
+
+// Reads the sessions of the PuTTY installed on this computer.
+function readLocalPutty() {
+  if (process.platform === 'win32') {
+    const { execFileSync } = require('child_process');
+    const tmp = path.join(os.tmpdir(), `shellfish-putty-${process.pid}-${Date.now()}.reg`);
+    try {
+      // Read-only: exports the PuTTY sessions key to a temporary file.
+      execFileSync('reg', ['export', PUTTY_KEY, tmp, '/y'], { stdio: 'ignore', windowsHide: true });
+    } catch {
+      return { format: 'PuTTY', candidates: [], warnings: ['No PuTTY sessions found in the registry'], file: 'PuTTY (registry)' };
+    }
+    try {
+      return { ...puttySessionsToCandidates(parsePuttyReg(readText(tmp)), 'the registry'), file: 'PuTTY (registry)' };
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+  }
+  const dir = path.join(os.homedir(), '.putty', 'sessions');
+  if (!fs.existsSync(dir)) return { format: 'PuTTY', candidates: [], warnings: [`No PuTTY sessions found (${dir} does not exist)`], file: dir };
+  return { ...puttySessionsToCandidates(parsePuttyDir(dir), dir), file: dir };
+}
+
 // ---- shared ---------------------------------------------------------------------------
 
 function parseFile(file) {
+  if (fs.statSync(file).isDirectory()) return puttySessionsToCandidates(parsePuttyDir(file), file);
+  const head = readText(file).slice(0, 200);
+  if (/^(Windows Registry Editor|REGEDIT4)/.test(head.trim())) return puttySessionsToCandidates(parsePuttyReg(readText(file)), file);
   const text = fs.readFileSync(file, 'utf8').slice(0, 4096);
   const firstLine = text.split(/\r?\n/).find((l) => l.trim()) || '';
   const looksCsv = /\.csv$/i.test(file) || (/,/.test(firstLine) && /host/i.test(firstLine) && !/^\s*host\s/i.test(firstLine));
@@ -313,7 +430,14 @@ function keyExists(p) {
 }
 
 function analyze(file, existingHosts) {
-  const result = parseFile(file);
+  return finish(parseFile(file), existingHosts);
+}
+
+function analyzeLocalPutty(existingHosts) {
+  return finish(readLocalPutty(), existingHosts);
+}
+
+function finish(result, existingHosts) {
   for (const c of result.candidates) {
     if (c.authType === 'key' && !keyExists(c.privateKeyPath)) c.warnings.push(`key file not found: ${c.privateKeyPath} (fix it in the host editor after importing)`);
   }
@@ -369,4 +493,4 @@ function apply(store, result, selectedKeys, groupOverride) {
   return { added, pulledIn };
 }
 
-module.exports = { analyze, apply, preview, parseCsvText, parseDestination };
+module.exports = { analyze, analyzeLocalPutty, apply, preview, parseCsvText, parseDestination, parsePuttyReg };

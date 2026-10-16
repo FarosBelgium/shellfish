@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { app, dialog } = require('electron');
+const { utils } = require('ssh2');
 const { startServer, generateKey } = require('./ssh-test-server');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'shellfish-test-'));
@@ -81,7 +82,7 @@ app.whenReady().then(async () => {
   fs.mkdirSync(remoteRoot);
 
   // 'importer' is the user of the hosts the import tests create (so they are not duplicates).
-  const jump1 = await startServer({ name: 'jump1', username: ['tester', 'importer'], password: 'jump1-pass' });
+  const jump1 = await startServer({ name: 'jump1', username: ['tester', 'importer', 'importer3'], password: 'jump1-pass' });
   const jump2 = await startServer({ name: 'jump2', publicKey: keyPair.public });
   const target = await startServer({ name: 'target', username: ['tester', 'importer', 'importer2'], password: 'target-pass', root: remoteRoot });
   const noFwd = await startServer({ name: 'nofwd', password: 'nofwd-pass', allowForwarding: false });
@@ -490,6 +491,121 @@ app.whenReady().then(async () => {
     assert(store.getHost(store.listHosts().find((h) => h.name === 'Web, "main"').id).passphrase, 'passphrase not saved');
     nextOpenFile = null;
   });
+
+  console.log('\nPuTTY');
+  const fixtures = path.join(__dirname, 'fixtures', 'putty');
+  const ppkFile = (n) => path.join(fixtures, n);
+  const puttyHost = await startServer({ name: 'puttyhost', username: ['putty', 'putty2'], publicKey: ['ed25519', 'rsa', 'ecdsa256'].map((k) => fs.readFileSync(ppkFile(`${k}.pub`), 'utf8')) });
+
+  await test('all PuTTY key variants (PPK v2/v3, Ed25519/RSA/ECDSA, with/without passphrase) convert correctly', async () => {
+    const ppk = require('../src/main/ppk');
+    const files = fs.readdirSync(fixtures).filter((f) => f.endsWith('.ppk'));
+    assert(files.length === 16, `expected 16 fixtures, found ${files.length}`);
+    for (const f of files) {
+      const text = fs.readFileSync(ppkFile(f), 'utf8');
+      const enc = f.includes('-enc');
+      const key = utils.parseKey(await ppk.ppkToOpenSsh(text, enc ? 'ppk-test-pass' : undefined));
+      assert(!(key instanceof Error), `${f}: ${key && key.message}`);
+      const pub = utils.parseKey(fs.readFileSync(ppkFile(f.replace(/-v\d(-enc)?\.ppk$/, '.pub')), 'utf8'));
+      assert(key.getPublicSSH().equals(pub.getPublicSSH()), `${f}: public key differs from puttygen's`);
+      assert(pub.verify(Buffer.from('x'), key.sign(Buffer.from('x'))), `${f}: signature does not verify`);
+      if (enc) {
+        let code = null;
+        try { await ppk.ppkToOpenSsh(text, 'wrong'); } catch (e) { code = e.code; }
+        assert(code === 'NEED_PASSPHRASE', `${f}: wrong passphrase gave ${code}`);
+      }
+    }
+  });
+
+  await test('connect with a PuTTY key (.ppk v3, Argon2 passphrase): prompts, wrong and right passphrase', async () => {
+    const h = add({ name: 'ppk-host', port: puttyHost.port, username: 'putty', authType: 'key', privateKeyPath: ppkFile('ed25519-v3-enc.ppk') });
+    const r1 = await ssh.openShell(win, store, makeSender(), { hostId: h.id });
+    assert(!r1.ok && r1.code === 'NEED_PASSPHRASE', `no passphrase: ${r1.code} ${r1.message}`);
+    const r2 = await ssh.openShell(win, store, makeSender(), { hostId: h.id, secrets: { [h.id]: { passphrase: 'wrong' } } });
+    assert(!r2.ok && r2.code === 'NEED_PASSPHRASE', `wrong passphrase: ${r2.code} ${r2.message}`);
+    const sender = makeSender();
+    const r3 = await ssh.openShell(win, store, sender, { hostId: h.id, secrets: { [h.id]: { passphrase: 'ppk-test-pass' } } });
+    assert(r3.ok, r3.message);
+    await until(() => (sender.out[r3.id] || '').includes('Welcome to puttyhost'), 8000, 'puttyhost banner');
+    ssh.closeSession(r3.id);
+    const h2 = add({ name: 'ppk-rsa-v2', port: puttyHost.port, username: 'putty', authType: 'key', privateKeyPath: ppkFile('rsa-v2.ppk') });
+    const r4 = await ssh.openShell(win, store, makeSender(), { hostId: h2.id });
+    assert(r4.ok, `rsa v2 unencrypted: ${r4.message}`);
+    ssh.closeSession(r4.id);
+  });
+
+  // A .reg file exactly as `reg export` writes it: UTF-16LE with BOM, CRLF, escaped backslashes.
+  const regEsc = (s) => s.replace(/\\/g, '\\\\');
+  const regSession = (name, values) => [`[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\${name}]`,
+    ...Object.entries(values).map(([k, v]) => (typeof v === 'number' ? `"${k}"=dword:${v.toString(16).padStart(8, '0')}` : `"${k}"="${regEsc(v)}"`)), ''];
+  const regText = ['Windows Registry Editor Version 5.00', '',
+    '[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions]', '',
+    ...regSession('Default%20Settings', { HostName: '', Protocol: 'ssh', PortNumber: 22 }),
+    ...regSession('Bastion%20Host', { HostName: '127.0.0.1', Protocol: 'ssh', PortNumber: jump1.port, UserName: 'importer3', ProxyMethod: 0 }),
+    ...regSession('Web%20Behind', { HostName: '127.0.0.1', Protocol: 'ssh', PortNumber: puttyHost.port, UserName: 'putty2', PublicKeyFile: ppkFile('ed25519-v3-enc.ppk'), ProxyMethod: 6, ProxyHost: 'Bastion Host', ProxyPort: 22 }),
+    ...regSession('Old%20Switch', { HostName: '10.0.0.9', Protocol: 'telnet', PortNumber: 23 }),
+    ...regSession('Via%20Socks', { HostName: 'deploy@10.1.1.1', Protocol: 'ssh', PortNumber: 22, ProxyMethod: 2, ProxyHost: 'socks.local' }),
+  ].join('\r\n');
+  const regFile = path.join(tmp, 'putty.reg');
+  fs.writeFileSync(regFile, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(regText, 'utf16le')]));
+
+  await test('PuTTY .reg export: sessions, SSH proxy as jump host, user@host, skipped protocols', async () => {
+    const r = importer.analyze(regFile, store.listHosts());
+    assert(r.format === 'PuTTY', r.format);
+    const names = r.candidates.map((c) => c.name).sort().join('|');
+    assert(names === 'Bastion Host|Via Socks|Web Behind', names);
+    assert(r.warnings.some((w) => /Old Switch: telnet/.test(w)), 'telnet session should be reported');
+    const by = (n) => r.candidates.find((c) => c.name === n);
+    const web = by('Web Behind');
+    assert(web.authType === 'key' && web.privateKeyPath === ppkFile('ed25519-v3-enc.ppk') && web.port === puttyHost.port, JSON.stringify(web));
+    assert(web.jump && web.jump.candidate === by('Bastion Host').key, 'SSH proxy should become the jump host');
+    const socks = by('Via Socks');
+    assert(socks.username === 'deploy' && socks.host === '10.1.1.1' && socks.warnings.some((w) => /SOCKS 5/.test(w)), JSON.stringify(socks));
+  });
+
+  await test('imported PuTTY session connects through its jump host with its .ppk key', async () => {
+    const r = importer.analyze(regFile, store.listHosts());
+    const res = importer.apply(store, r, [r.candidates.find((c) => c.name === 'Web Behind').key], 'PuTTY');
+    assert(res.added.join(',') === 'Bastion Host,Web Behind', JSON.stringify(res));
+    const hs = store.listHosts();
+    const web = hs.find((h) => h.name === 'Web Behind');
+    const bastion = hs.find((h) => h.name === 'Bastion Host');
+    const sender = makeSender();
+    const before = jump1.stats.forwards.length;
+    const sh = await ssh.openShell(win, store, sender, { hostId: web.id, secrets: { [bastion.id]: { password: 'jump1-pass' }, [web.id]: { passphrase: 'ppk-test-pass' } } });
+    assert(sh.ok, sh.message);
+    await until(() => (sender.out[sh.id] || '').includes('Welcome to puttyhost'), 8000, 'banner');
+    assert(jump1.stats.forwards.slice(before).includes(`127.0.0.1:${puttyHost.port}`), 'did not go through the bastion');
+    ssh.closeSession(sh.id);
+  });
+
+  await test('PuTTY sessions folder (Linux/macOS ~/.putty/sessions)', async () => {
+    const dir = path.join(tmp, 'putty-sessions');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'My%20Box'), 'HostName=box.example.com\nPortNumber=2200\nUserName=admin\nProtocol=ssh\nPublicKeyFile=\n');
+    fs.writeFileSync(path.join(dir, 'Default%20Settings'), 'HostName=\nProtocol=ssh\n');
+    const r = importer.analyze(dir, []);
+    assert(r.candidates.length === 1 && r.candidates[0].name === 'My Box' && r.candidates[0].port === 2200 && r.candidates[0].authType === 'password', JSON.stringify(r.candidates));
+  });
+
+  if (process.platform === 'win32' && process.env.CI) {
+    // Only on CI: writes PuTTY sessions into this machine's registry.
+    await test('Windows: "Import from PuTTY" reads the sessions from the real registry', async () => {
+      const { execFileSync } = require('child_process');
+      execFileSync('reg', ['import', regFile]);
+      const r = importer.analyzeLocalPutty([]);
+      assert(r.candidates.map((c) => c.name).sort().join('|') === 'Bastion Host|Via Socks|Web Behind', JSON.stringify(r));
+      assert(r.candidates.find((c) => c.name === 'Web Behind').privateKeyPath === ppkFile('ed25519-v3-enc.ppk'), 'key path from the registry');
+    });
+  }
+
+  await test('import window offers "Import from PuTTY"', async () => {
+    await js(`document.querySelector('#btn-import').click()`);
+    const labels = await js(`[...document.querySelectorAll('#import-card button')].map(b => b.textContent)`);
+    assert(labels.includes('Import from PuTTY'), labels.join('|'));
+    await js('closeImport()');
+  });
+  puttyHost.close();
 
   // ---- summary ----
   const failed = results.filter((r) => !r.ok);

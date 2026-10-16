@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { Client } = require('ssh2');
+const ppk = require('./ppk');
 const { dialog } = require('electron');
 
 const sessions = new Map(); // id -> { type, conn, stream?, sftp?, sender }
@@ -74,14 +75,29 @@ function classifyError(err) {
 
 // Connects to one host. `sock` is a tunnel through the previous hop (or undefined
 // for a direct connection). `secret` overrides the saved password/passphrase.
-function connectHop(win, store, host, secret = {}, sock) {
+async function connectHop(win, store, host, secret = {}, sock) {
+  const annotate = (e) => {
+    e.code = e.code || classifyError(e);
+    e.hostId = host.id; // tells the UI which hop needs a password
+    e.hostName = host.name;
+    return e;
+  };
+  // PuTTY keys (.ppk) are converted to OpenSSH format in memory, never written to disk.
+  let ppkKey = null;
+  if (host.authType === 'key') {
+    const keyPath = expandHome(host.privateKeyPath);
+    let raw;
+    try { raw = fs.readFileSync(keyPath); } catch (e) { throw annotate(new Error(`Cannot read private key ${keyPath}: ${e.message}`)); }
+    if (ppk.isPpk(raw)) {
+      try {
+        ppkKey = await ppk.ppkToOpenSsh(raw.toString('utf8'), secret.passphrase ?? store.unseal(host.passphrase));
+      } catch (e) {
+        throw annotate(e);
+      }
+    }
+  }
   return new Promise((resolve, reject) => {
-    const fail = (e) => {
-      e.code = e.code || classifyError(e);
-      e.hostId = host.id; // tells the UI which hop needs a password
-      e.hostName = host.name;
-      reject(e);
-    };
+    const fail = (e) => reject(annotate(e));
     const cfg = {
       host: host.host,
       port: host.port || 22,
@@ -95,7 +111,9 @@ function connectHop(win, store, host, secret = {}, sock) {
       },
     };
     try {
-      if (host.authType === 'key') {
+      if (ppkKey) {
+        cfg.privateKey = ppkKey; // already decrypted
+      } else if (host.authType === 'key') {
         const keyPath = expandHome(host.privateKeyPath);
         try { cfg.privateKey = fs.readFileSync(keyPath); } catch (e) { throw new Error(`Cannot read private key ${keyPath}: ${e.message}`); }
         const pp = secret.passphrase ?? store.unseal(host.passphrase);

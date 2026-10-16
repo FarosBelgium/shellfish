@@ -287,10 +287,12 @@ function openImport() {
   const card = $('#import-card');
   card.replaceChildren(
     el('h2', { text: 'Import hosts' }),
-    el('p', { class: 'muted', text: 'From Termius, an OpenSSH config file, or a CSV file. You get a preview first.' }),
+    el('p', { class: 'muted', text: 'From PuTTY, Termius, an OpenSSH config file or a CSV file. You get a preview first.' }),
     el('div', { class: 'import-choices' },
       el('button', { class: 'btn primary', text: 'Choose a file…', onclick: () => loadImport({}) }),
+      el('button', { class: 'btn', text: 'Import from PuTTY', title: api.platform === 'win32' ? 'Reads your PuTTY sessions from the Windows registry' : 'Reads your PuTTY sessions from ~/.putty/sessions', onclick: () => loadImport({ putty: true }) }),
       el('button', { class: 'btn', text: 'Import ~/.ssh/config', onclick: () => loadImport({ sshConfig: true }) })),
+    el('p', { class: 'muted small', text: 'PuTTY on another computer? Export its sessions there with: reg export HKCU\\Software\\SimonTatham\\PuTTY\\Sessions putty.reg, and choose that file here. PuTTY keys (.ppk) work as they are.' }),
     el('div', { class: 'import-help' },
       el('b', { text: 'From Termius' }),
       el('p', { text: 'Termius no longer has an export function. The open-source tool termius-export reads your Termius data on this computer (offline) and writes hosts.csv and sshconfig files.' }),

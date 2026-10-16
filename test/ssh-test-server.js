@@ -21,7 +21,7 @@ function generateKey(type = 'ed25519', opts = {}) {
 // `username` may be a list of accepted user names.
 function startServer({ name, username = 'tester', password, publicKey, allowForwarding = true, root }) {
   const hostKey = generateKey().private;
-  const allowedKey = publicKey ? utils.parseKey(publicKey) : null;
+  const allowedKeys = [].concat(publicKey || []).map((k) => utils.parseKey(k)); // one key or a list
   const stats = { connections: 0, open: 0, forwards: [], authFailures: 0 };
 
   const server = new Server({ hostKeys: [hostKey] }, (client) => {
@@ -37,13 +37,13 @@ function startServer({ name, username = 'tester', password, publicKey, allowForw
         stats.authFailures++;
         return ctx.reject();
       }
-      if (ctx.method === 'publickey' && allowedKey) {
-        const ok = ctx.key.algo === allowedKey.type && ctx.key.data.equals(allowedKey.getPublicSSH());
-        if (!ok) { stats.authFailures++; return ctx.reject(); }
+      if (ctx.method === 'publickey' && allowedKeys.length) {
+        const key = allowedKeys.find((k) => ctx.key.data.equals(k.getPublicSSH()));
+        if (!key) { stats.authFailures++; return ctx.reject(); }
         if (!ctx.signature) return ctx.accept(); // key is acceptable; client will sign
-        return allowedKey.verify(ctx.blob, ctx.signature, ctx.hashAlgo) ? ctx.accept() : ctx.reject();
+        return key.verify(ctx.blob, ctx.signature, ctx.hashAlgo) ? ctx.accept() : ctx.reject();
       }
-      ctx.reject([password && 'password', allowedKey && 'publickey'].filter(Boolean));
+      ctx.reject([password && 'password', allowedKeys.length && 'publickey'].filter(Boolean));
     });
 
     client.on('ready', () => {

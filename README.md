@@ -94,7 +94,8 @@ Don't use `--no-sandbox`: it switches off a layer of protection. Re-run the setu
 - **Saved hosts** in the sidebar, with search and optional groups. Click a host to open an SSH terminal; hover it for **SSH**, **SFTP**, **⧉ duplicate** and **✎ edit**.
 - **Jump hosts / SSH tunnel**: under **Connect via** in the host editor, pick another saved host to tunnel through (like `ssh -J`). Chains work too: a jump host can have its own jump host (A → B → server). SSH and SFTP both go through the tunnel. Every hop gets its own host key check and password prompt. The sidebar shows the route (`↳ via bastion → internal`).
 - **Saved commands**: save frequently used commands per host (host editor → **Saved commands**, or **+** in the terminal's command bar, which fills in the selected terminal text). They show as buttons above the terminal. A click pastes the command, so you can review it and press Enter yourself. Tick **Run** for a command to press Enter for you. Right-click a button to edit the host's commands.
-- **Import** hosts with the **Import** button: from Termius, from an OpenSSH config file (`~/.ssh/config` with one click), or from a CSV file. A preview shows what will be added. Hosts you already have are skipped, and jump hosts (`ProxyJump`, `ProxyCommand ssh -W`) are linked automatically. See [Importing from Termius](#importing-from-termius).
+- **Import** hosts with the **Import** button: from PuTTY, Termius, an OpenSSH config file (`~/.ssh/config` with one click) or a CSV file. A preview shows what will be added. Hosts you already have are skipped, and jump hosts are linked automatically. See [Importing from PuTTY](#importing-from-putty) and [Importing from Termius](#importing-from-termius).
+- **PuTTY keys** (`.ppk`, version 2 and 3, Ed25519/RSA/ECDSA, with or without passphrase) work as they are; there's no need to convert them with PuTTYgen. Shellfish converts them in memory when connecting; the decrypted key is never written to disk.
 - **Duplicate** a host (⧉ in the sidebar, or **Duplicate** in the editor) to create a similar one. Everything is copied, including the saved password, so you only change what's different (e.g. the IP address).
 - **Environment colours**: give a host a colour and label (presets: Development, Test, Acceptance, Production, or pick your own). The terminal gets a coloured frame, a banner with the label and a tinted background. The tab, the sidebar entry and the SFTP server pane are coloured too, so you can see at a glance whether you're on production.
 - **Authentication** with username + password, or username + private key (with an optional passphrase). If a password or passphrase isn't saved, or is wrong, you're asked for it when you connect, and that one isn't saved.
@@ -106,6 +107,15 @@ Don't use `--no-sandbox`: it switches off a layer of protection. Re-run the setu
   - New folder, rename (`F2`), delete (`Del`). Local deletes go to the trash. Remote deletes are permanent and ask for confirmation first.
   - Asks before overwriting. The transfer panel shows progress.
 - Tabs: `Ctrl+Shift+T` for a new local terminal, `Ctrl+Tab` to cycle, `Ctrl+Shift+W` or middle-click to close.
+
+## Importing from PuTTY
+
+- **On the same computer:** click **Import → Import from PuTTY**. On Windows, Shellfish reads your saved sessions from the registry (read-only, via `reg export`); on Linux and macOS, from `~/.putty/sessions`.
+- **From another Windows computer:** export the sessions there with
+  `reg export HKCU\Software\SimonTatham\PuTTY\Sessions putty.reg`,
+  and choose `putty.reg` with **Import → Choose a file…**.
+
+What's imported: session name, host, port, user (also from `user@host` in the host field) and the private key file (`.ppk`). PuTTY's "SSH to proxy and use port forwarding" (PuTTY 0.77+) becomes a jump host. PuTTY doesn't save passwords, so Shellfish asks for them on first connect. Telnet, serial and raw sessions, SOCKS/HTTP proxies and port forwards aren't supported and are reported in the preview. If the `.ppk` paths in a `.reg` from another computer don't exist on yours, the preview warns you; fix the key path in the host editor afterwards.
 
 ## Importing from Termius
 

@@ -79,6 +79,7 @@ jobs:
           # Back to Ubuntu's default: the installed app must run with its own AppArmor profile.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1
           ELECTRON_RUN_AS_NODE=1 /opt/Shellfish/shellfish test/packaged-pty-test.js /opt/Shellfish/resources
+          ELECTRON_RUN_AS_NODE=1 /opt/Shellfish/shellfish test/packaged-ppk-test.js /opt/Shellfish/resources
           xvfb-run -a node test/update-test.js /opt/Shellfish/shellfish dist
           xvfb-run -a node test/update-test.js /opt/Shellfish/shellfish dist --tamper
 
@@ -95,8 +96,11 @@ jobs:
           $env:ELECTRON_RUN_AS_NODE = '1'
           $p = Start-Process $exe -ArgumentList 'test/packaged-pty-test.js', "`"$env:LOCALAPPDATA\Programs\Shellfish\resources`"" -Wait -PassThru -NoNewWindow -RedirectStandardOutput pty-out.txt
           Get-Content pty-out.txt
-          Remove-Item Env:ELECTRON_RUN_AS_NODE
           if ($p.ExitCode -ne 0) { throw "packaged node-pty test failed ($($p.ExitCode))" }
+          $p = Start-Process $exe -ArgumentList 'test/packaged-ppk-test.js', "`"$env:LOCALAPPDATA\Programs\Shellfish\resources`"" -Wait -PassThru -NoNewWindow -RedirectStandardOutput ppk-out.txt
+          Get-Content ppk-out.txt
+          Remove-Item Env:ELECTRON_RUN_AS_NODE
+          if ($p.ExitCode -ne 0) { throw "packaged PuTTY key test failed ($($p.ExitCode))" }
           node test/update-test.js $exe dist
           if ($LASTEXITCODE -ne 0) { exit 1 }
           node test/update-test.js $exe dist --tamper
@@ -119,6 +123,7 @@ jobs:
           # the installed app is a different program, so macOS would ask "allow access?" and block.
           security delete-generic-password -s "shellfish Safe Storage" || true
           ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/Shellfish" test/packaged-pty-test.js "$app/Contents/Resources"
+          ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/Shellfish" test/packaged-ppk-test.js "$app/Contents/Resources"
           node test/update-test.js "$app/Contents/MacOS/Shellfish" dist
 
       - name: Upload installers
