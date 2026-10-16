@@ -102,7 +102,9 @@ server.listen(0, '127.0.0.1', () => {
     console.log(`requests: ${served.join(' ')}`);
     if (exited !== null) console.log(`app exited early with ${exited}`);
     console.log(done
-      ? (tamper ? `PASS: packaged ${process.platform} app rejected the tampered update` : `PASS: packaged ${process.platform} app found, downloaded and verified the update`)
+      ? (tamper ? `PASS: packaged ${process.platform} app rejected the tampered update`
+        : process.platform === 'darwin' ? 'PASS: packaged darwin app found the update (offered as a manual download)'
+        : `PASS: packaged ${process.platform} app found, downloaded and verified the update`)
       : 'FAIL');
     process.exit(done ? 0 : 1);
   }, 500);

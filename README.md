@@ -4,38 +4,36 @@ A desktop SSH/SFTP client for saved hosts. Click a host to open a terminal, or o
 
 ## Install
 
+Download the installer from the [latest release](https://github.com/FarosBelgium/shellfish/releases/latest):
+
 | System | File | Data folder |
 |---|---|---|
-| Ubuntu / Debian | `dist/shellfish_1.3.0_amd64.deb` | `~/.config/shellfish/data/` |
-| Windows 10/11 | `dist/Shellfish-Setup-1.3.0.exe` | `%APPDATA%\shellfish\data\` |
-| macOS (Apple Silicon: M1 or newer) | `dist/Shellfish-1.3.0-mac-arm64.zip` | `~/Library/Application Support/shellfish/data/` |
-| macOS (Intel) | `dist/Shellfish-1.3.0-mac-x64.zip` | same |
+| Ubuntu / Debian | `shellfish_<version>_amd64.deb` | `~/.config/shellfish/data/` |
+| Windows 10/11 | `Shellfish-Setup-<version>.exe` | `%APPDATA%\shellfish\data\` |
+| macOS, Apple Silicon (M1 or newer) | `Shellfish-<version>-mac-arm64.dmg` | `~/Library/Application Support/shellfish/data/` |
+| macOS, Intel | `Shellfish-<version>-mac-x64.dmg` | same |
 
 Installing a newer version replaces the old one; you never end up with two versions side by side. Uninstalling or updating keeps your saved hosts.
 
 ### Ubuntu / Debian
 
 ```bash
-sudo apt install ./dist/shellfish_1.3.0_amd64.deb
+sudo apt install ./shellfish_<version>_amd64.deb
 ```
 
 Shellfish then appears in your applications menu. You can also start it with `shellfish` from a terminal. The installer sets up the AppArmor sandbox profile itself.
 
 ### Windows
 
-Run `Shellfish-Setup-1.3.0.exe`. No administrator rights are needed: it installs for the current user only. The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**.
+Run `Shellfish-Setup-<version>.exe`. No administrator rights are needed: it installs for the current user only. The installer isn't code-signed, so Windows SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**.
 
 To open another drive in the SFTP left pane, type it in the path bar (e.g. `D:\`) and press Enter.
 
 ### macOS
 
-Unzip the file and drag **Shellfish.app** to **Applications**. The app isn't signed with an Apple Developer certificate, so macOS blocks it the first time. Run this once in Terminal:
+Open the `.dmg` and drag **Shellfish** to **Applications**. The app isn't notarized by Apple, so the first time macOS says it can't verify the developer. Open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to Shellfish. You only need to do this once.
 
-```bash
-xattr -cr /Applications/Shellfish.app && codesign --force --deep --sign - /Applications/Shellfish.app
-```
-
-After that it opens normally.
+macOS may also ask whether Shellfish may use its keychain item "shellfish Safe Storage". That's where the key for your saved passwords is kept. Click **Always Allow**.
 
 ### Updates
 
