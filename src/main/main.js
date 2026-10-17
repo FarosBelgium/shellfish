@@ -57,7 +57,8 @@ function createWindow() {
   // Never navigate away from the app or open new windows.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('destroyed', () => ssh.closeAllForSender(win.webContents));
+  const contents = win.webContents;
+  contents.on('destroyed', () => ssh.closeAllForSender(contents));
 }
 
 // Wraps an IPC handler so errors reach the renderer as {ok:false,...} instead of throwing.
