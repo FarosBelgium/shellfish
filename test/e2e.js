@@ -464,6 +464,19 @@ app.whenReady().then(async () => {
     await until(() => termText().then((t) => t.includes('target says: ls -la /tmpecho hi')), 5000, 'run command executed');
   });
 
+  await test('Ctrl+Shift+V pastes the clipboard once', async () => {
+    require('electron').clipboard.writeText('pasted-once');
+    await js(`document.querySelector('.tabview.active .xterm-helper-textarea').focus()`);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: ['control', 'shift'] });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: ['control', 'shift'] });
+    await wait(500);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+    win.webContents.sendInputEvent({ type: 'char', keyCode: '\r' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+    const line = await until(() => termText().then((t) => (t.match(/target says: (\S*pasted-once\S*)/) || [])[1]), 5000, 'pasted line');
+    assert(line === 'pasted-once', `server got: ${line}`);
+  });
+
   await test('"+" in the terminal saves a command for the host', async () => {
     await js(`(() => {
       const answers = ['whoami', 'Who am I'];

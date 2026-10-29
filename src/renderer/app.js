@@ -818,6 +818,9 @@ function openTerminal(host) {
     cursorBlink: true,
     fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Mono", "DejaVu Sans Mono", Menlo, monospace',
     fontSize: 14,
+    // Some fonts (e.g. DejaVu Sans Mono, the usual fallback on Linux) draw "_" just
+    // below the cell; at line height 1 the next row hides it.
+    lineHeight: 1.1,
     scrollback: 10000,
     allowProposedApi: false,
     theme: { background: termBg, foreground: '#d7dde5', cursor: '#7cc4ff', selectionBackground: '#2f4a66' },
@@ -890,7 +893,9 @@ function openTerminal(host) {
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown' || !e.ctrlKey || !e.shiftKey) return true;
     if (e.code === 'KeyC') { if (term.hasSelection()) navigator.clipboard.writeText(term.getSelection()); return false; }
-    if (e.code === 'KeyV') { navigator.clipboard.readText().then((t) => term.paste(t)); return false; }
+    // preventDefault: otherwise Chromium also fires its own "paste as plain text" into
+    // xterm's textarea, and the text lands in the shell twice.
+    if (e.code === 'KeyV') { e.preventDefault(); navigator.clipboard.readText().then((t) => term.paste(t)); return false; }
     return true;
   });
   termEl.addEventListener('contextmenu', (e) => {
